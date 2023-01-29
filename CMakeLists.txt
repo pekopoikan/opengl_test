@@ -4,5 +4,8 @@ project(opengl)
 add_executable(opengl main.cpp)
 
 find_package(OpenGL REQUIRED)
+find_package(assimp REQUIRED)
 
-include_directories(${OPENGL_INCLUDE_DIRS} ${GLUT_INCLUDE_DIRS})
+target_link_libraries(opengl PRIVATE assimp::assimp)
+
+include_directories(${OPENGL_INCLUDE_DIRS} ${ASSIMP_INCLUDE_DIR})
