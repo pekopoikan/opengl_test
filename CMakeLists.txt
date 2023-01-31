@@ -7,5 +7,8 @@ find_package(OpenGL REQUIRED)
 find_package(assimp REQUIRED)
 
 target_link_libraries(opengl PRIVATE assimp::assimp)
+target_link_libraries(opengl PRIVATE glfw)
+
+target_sources(opengl PRIVATE glad.c)
 
 include_directories(${OPENGL_INCLUDE_DIRS} ${ASSIMP_INCLUDE_DIR})
