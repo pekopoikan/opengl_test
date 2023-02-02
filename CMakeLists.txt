@@ -10,5 +10,6 @@ target_link_libraries(opengl PRIVATE assimp::assimp)
 target_link_libraries(opengl PRIVATE glfw)
 
 target_sources(opengl PRIVATE glad.c)
+target_include_directories(opengl PRIVATE glm)
 
 include_directories(${OPENGL_INCLUDE_DIRS} ${ASSIMP_INCLUDE_DIR})
