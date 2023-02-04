@@ -19,3 +19,9 @@ Uniforms are another way to pass date from our application on the CPU tot he sha
 `glGetUniformformLocation`
 `glUniform4f`
 ```
+
+```
+- glm::rotate
+- glm::scale
+- glm::translate
+```

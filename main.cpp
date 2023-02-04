@@ -6,6 +6,7 @@
 #include <glm.hpp>
 #include <gtc/matrix_transform.hpp>
 #include <gtc/type_ptr.hpp>
+#include <iostream>
 
 bool g_bDebug {false};
 
@@ -44,9 +45,21 @@ const char* fragmentShader =
 "}\n\0";
 
 const float vertices[] = {
-    0.0f, 0.5f, 0.0f,
+    -0.2f, 0.5f, 0.0f,
     -0.2f, 0.0f, 0.0f,
-    0.2f, 0.0f, 0.0f
+    0.2f, 0.0f, 0.0f,
+    0.2f, 0.5f, 0.0f,
+};
+
+const unsigned int indices[] = {
+    0, 1, 2,
+    2, 3, 0
+};
+
+const float texCoords[] = {
+    0.0f, 0.0f,
+    1.0f, 0.0f,
+    0.5f, 1.0f
 };
 
 int main()
@@ -77,13 +90,19 @@ int main()
 
     glfwSetFramebufferSizeCallback(window, set_view_port);
 
-    unsigned int VBO, VAO;
+    unsigned int VBO, VAO, EBO;
     glGenBuffers(1, &VBO);
+    glGenBuffers(1, &EBO);
     glGenVertexArrays(1, &VAO);
 
     glBindVertexArray(VAO);
+
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*) 0);
     glEnableVertexAttribArray(0);
 
@@ -103,12 +122,16 @@ int main()
     glDeleteShader(vertex_shader);
     glDeleteShader(fragment_shader);
 
-    glm::mat4 v = glm::mat4(1.0f);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
+
+    //v = glm::scale(v, glm::vec3(2.6f, 1.0f, 1.0f));
+
+    glm::mat4 v = glm::mat4();
 
     while(!glfwWindowShouldClose(window))
     {
         if(g_bDebug) {
-            glPolygonMode(GL_BACK, GL_LINE);
+            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         } else {
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         }
@@ -123,7 +146,19 @@ int main()
 
         glUseProgram(program);
 
-        v = glm::rotate(v, 0.03f * glm::radians(180.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        v = glm::rotate(v, 0.08f * glm::radians(20.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        //v = glm::translate(v, glm::vec3(0.001f, 0.0f, 0.0f));
+        //v = glm::scale(v, glm::vec3(1.0f, 1.0f, 1.0f));
+
+        double ac = glm::cos(time * glm::radians(20.0f));
+        double as = glm::sin(time * glm::radians(20.0f));
+
+        v[0][0] = ac;
+        v[0][2] = as;
+        v[1][1] = 1;
+        v[2][0] = -1 * as;
+        v[2][2] = ac;
+        v[3][3] = 1;
 
         unsigned int locamat = glGetUniformLocation(program, "transform");
         glUniformMatrix4fv(locamat, 1, GL_FALSE, glm::value_ptr(v));
@@ -132,7 +167,8 @@ int main()
         glUniform4f(location, 0.0, green, 0.0, 1.0f);
 
         glBindVertexArray(VAO);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
