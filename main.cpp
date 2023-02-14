@@ -11,14 +11,18 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <string>
 #include <signal.h>
 #include <algorithm>
 #include <map>
 
-//#undef DEBUG
-#define DEBUG
+#include <imgui.h>
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_opengl3.h>
 
-bool g_poly_mode { true };
+#include "stb_image.h"
+
+bool g_poly_mode { false };
 
 const float g_vertices[] =
 {
@@ -30,13 +34,22 @@ const unsigned int g_indices[] =
     #include "indices.inc"
 };
 
+glm::vec3 g_x(0.0f, 0.0f, 3.0f);
+glm::vec3 g_up(0.0f, 0.8f, 0.0f);
+glm::vec3 g_down(0.0f, 1.0f, 0.0f);
 
-float g_y_pos { 0.0f };
+glm::vec3 g_pos(0.0f, 0.0f, 0.0f);
+
+glm::vec3 g_rot(0.0f, 0.0f, 1.0f);
+
+glm::vec3 g_model(1.0f, 0.0f, 0.0f);
+float g_model_angle {-55.0f};
+
 float g_z_rot { 0.0f };
-float g_camera_dis { 50.0f };
+float g_camera_dis { 30.0f };
 
 const unsigned int g_window_h { 500 };
-const unsigned int g_window_w { 500 };
+const unsigned int g_window_w { 1000 };
 
 enum PROGRAM_EXIT
 {
@@ -55,34 +68,14 @@ class Shader
 
     private:
         unsigned int vertex_shader, fragment_shader, program;
-        #ifdef DEBUG
-        const char* vertex_context = "#version 330 core\n"
-                                    "layout (location = 0) in vec3 aPos;\n"
-                                    "uniform mat4 projection;\n"
-                                    "uniform mat4 view;\n"
-                                    "uniform mat4 model;\n"
-                                    "uniform mat4 transformation;\n"
-                                    "void main() {\n"
-                                    "gl_Position = projection * view * model * transformation * vec4(aPos, 1.0);\n"
-                                    "}\n\0";
-        const char* fragment_context = "#version 330 core\n"
-                                    "out vec4 FragColor;\n"
-                                    "void main()\n"
-                                    "{\n"
-                                    "FragColor = vec4(1.0f, 0.5f, 0.2f, 1.0f);\n"
-                                    "}\n\0";
-        #else
-        const char* vertex_context;
-        const char* fragment_context;
-        #endif
+        std::string vertex_context;
+        std::string fragment_context;
         std::map<const char*, glm::mat4> transformation_matrices;
     public:
         Shader(const char* vertex_file, const char* fragment_file)
         {
-            #ifndef DEBUG
-            setupContext(vertex_file, &vertex_context);
-            setupContext(fragment_file, &fragment_context);
-            #endif
+            setupContext(vertex_file, vertex_context);
+            setupContext(fragment_file, fragment_context);
 
             setupShader();
         };
@@ -90,7 +83,7 @@ class Shader
     public:
         void addTransformation(const char*, glm::mat4&);
     private:
-        void setupContext(const char*, const char**);
+        void setupContext(const char*, std::string&);
         void setupShader();
 };
 
@@ -107,27 +100,41 @@ void Shader::addTransformation(const char* name, glm::mat4& mat)
     //}
 }
 
-void Shader::setupContext(const char* file_name, const char** context)
+void Shader::setupContext(const char* file_name, std::string& context)
 {
-    std::ifstream file(file_name);
+    std::ifstream file;
     std::stringstream sstr;
 
-    sstr << file.rdbuf();
+    try {
+        file.open(file_name, std::ios::out);
 
-    *context = sstr.str().c_str();
+        if(!file)
+        {
+            fprintf(stdout, "error");
+            abort();
+        }
 
-    file.close();
-    sstr.clear();
+        sstr << file.rdbuf();
+
+        file.close();
+
+        context = sstr.str();
+    } catch (const std::ifstream::failure& ex) {
+        fprintf(stdout, "%s", ex.what());
+    }
 }
 
 void Shader::setupShader()
 {
+    const char* v_source = vertex_context.c_str();
+    const char* f_source = fragment_context.c_str();
+
     vertex_shader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertex_shader, 1, &vertex_context, NULL);
+    glShaderSource(vertex_shader, 1, &v_source, NULL);
     glCompileShader(vertex_shader);
 
     fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragment_shader, 1, &fragment_context, NULL);
+    glShaderSource(fragment_shader, 1, &f_source, NULL);
     glCompileShader(fragment_shader);
 
     program = glCreateProgram();
@@ -149,7 +156,13 @@ class Mesh
         {
             setupMeshes();
         };
-        ~Mesh();
+        ~Mesh()
+        {
+            glDeleteBuffers(1, &VBO);
+            glDeleteBuffers(1, &EBO);
+            glDeleteVertexArrays(1, &VAO);
+            glDeleteTextures(1, &TEX);
+        };
     public:
         void Draw(class Shader&);
     private:
@@ -157,51 +170,10 @@ class Mesh
     private:
         std::vector<float> vertices;
         std::vector<unsigned int> indices;
-        unsigned int VAO, VBO, EBO;
+        unsigned int VAO, VBO, EBO, TEX;
+        int width, height, nrChannels;
+        unsigned char* data;
 };
-
-Mesh::~Mesh()
-{
-    glDeleteBuffers(1, &VBO);
-    glDeleteBuffers(1, &EBO);
-    glDeleteVertexArrays(1, &VAO);
-}
-
-void Mesh::Draw(Shader& shader)
-{
-    // how far
-    glm::mat4 projection = glm::perspective(glm::radians(g_camera_dis), (float)g_window_w / (float)g_window_h, 0.1f, 100.0f);
-
-    glm::mat4 look = glm::mat4(1.0f);
-    // camera view angles, camera pos, camera pos
-    look = glm::lookAt(glm::vec3(0.0f, -3.0f, 6.0f), glm::vec3(0.0f, 0.6f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-
-    glm::mat4 transl = glm::mat4(1.0f);
-    transl = glm::translate(transl, glm::vec3(0.0f, g_y_pos, 1.0f));
-
-    glm::mat4 move = glm::mat4(1.0f);
-    move = glm::rotate(move, glm::radians(g_z_rot), glm::vec3(0.0f, 0.0f, 1.0f));
-
-    glm::mat4 transformation = transl * move;
-    
-    glUseProgram(shader.program);
-
-    unsigned int locy = glGetUniformLocation(shader.program, "transformation");
-    glUniformMatrix4fv(locy, 1, GL_FALSE, glm::value_ptr(transformation));
-
-    unsigned int loc1 = glGetUniformLocation(shader.program, "projection");
-    glUniformMatrix4fv(loc1, 1, GL_FALSE, glm::value_ptr(projection));
-
-    unsigned int loc = glGetUniformLocation(shader.program, "view");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, glm::value_ptr(look));
-
-    glUniformMatrix4fv(glGetUniformLocation(shader.program, "model"), 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
-
-    glBindVertexArray(VAO);
-
-    //glDrawElements(GL_TRIANGLES, sizeof(indices) / sizeof(indices[0]), GL_UNSIGNED_INT, 0);
-    glDrawArrays(GL_TRIANGLES, 0, sizeof(g_vertices) / sizeof(g_vertices[0]));
-}
 
 void Mesh::setupMeshes()
 {
@@ -217,8 +189,60 @@ void Mesh::setupMeshes()
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), &indices[0], GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*) 0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*) 0);
     glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*) (3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    glGenTextures(1, &TEX);
+    glBindTexture(GL_TEXTURE_2D, TEX);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	// set texture wrapping to GL_REPEAT (default wrapping method)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    // set texture filtering parameters
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    data = stbi_load("container.jpg", &width, &height, &nrChannels, 0);
+
+    if(data) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+    } else {
+        fprintf(stdout, "error");
+    }
+    stbi_image_free(data);
+}
+
+void Mesh::Draw(Shader& shader)
+{
+    glm::mat4 projection = glm::perspective(glm::radians(g_camera_dis), (float)g_window_w / (float)g_window_h, 0.1f, 100.0f);
+
+    glm::mat4 look = glm::mat4(1.0f);
+    look = glm::lookAt(g_x, g_up, g_down);
+
+    glm::mat4 transl = glm::mat4(1.0f);
+    transl = glm::translate(transl, g_pos);
+
+    glUseProgram(shader.program);
+
+    unsigned int locy = glGetUniformLocation(shader.program, "transformation");
+    glUniformMatrix4fv(locy, 1, GL_FALSE, glm::value_ptr(transl));
+
+    unsigned int loc1 = glGetUniformLocation(shader.program, "projection");
+    glUniformMatrix4fv(loc1, 1, GL_FALSE, glm::value_ptr(projection));
+
+    unsigned int loc = glGetUniformLocation(shader.program, "view");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, glm::value_ptr(look));
+
+    glm::mat4 model = glm::mat4(1.0f);
+    model = glm::rotate(model, glm::radians(-55.0f), g_model);
+
+    glUniformMatrix4fv(glGetUniformLocation(shader.program, "model"), 1, GL_FALSE, glm::value_ptr(model));
+
+    glBindTexture(GL_TEXTURE_2D, TEX);
+    glBindVertexArray(VAO);
+    glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
+    //glDrawArrays(GL_TRIANGLES, 0, vertices.size());
 }
 
 void turn_polygon_mode(int);
@@ -238,6 +262,15 @@ int actual_program(int argc, char** argv)
     gladLoadGLLoader((GLADloadproc) glfwGetProcAddress);
 
     glEnable(GL_DEPTH_TEST);
+    glEnable(GL_TEXTURE);
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    ImGui::StyleColorsDark();
+
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init();
 
     std::vector<float> v;
     std::vector<unsigned int> i;
@@ -245,7 +278,7 @@ int actual_program(int argc, char** argv)
     std::copy(&g_vertices[0], &g_vertices[sizeof(g_vertices) / sizeof(g_vertices[0])], std::back_inserter(v));
     std::copy(&g_indices[0], &g_indices[sizeof(g_indices) / sizeof(g_indices[0])], std::back_inserter(i));
 
-    Shader shader("vshader.txt", "fshader.txt");
+    Shader shader("vshader.vs", "fshader.fs");
 
     Mesh m(v, i);
 
@@ -253,9 +286,32 @@ int actual_program(int argc, char** argv)
 
     while(!glfwWindowShouldClose(window))
     {
-        if(g_poly_mode)
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
         {
+            ImGui::Begin("Debug");
+            if(ImGui::Button("Polygon Mode"))
+            {
+                turn_polygon_mode(0);
+            }
+            ImGui::SliderFloat("Camera Distance", &g_camera_dis, -100.0f, 100.0f, "%.3f");
+            ImGui::SliderFloat3("Right Vector", glm::value_ptr(g_x), -100.0f, 100.0f);
+            ImGui::SliderFloat3("Up Vector", glm::value_ptr(g_up), -100.0f, 100.0f);
+            ImGui::SliderFloat3("Down Vector", glm::value_ptr(g_down), -100.0f, 100.0f);
+            ImGui::SliderFloat3("Pos", glm::value_ptr(g_pos), -100.0f, 100.0f);
+            ImGui::SliderFloat3("Model", glm::value_ptr(g_model), 0.0f, 1.0f);
+            ImGui::SliderFloat("Model angle", &g_model_angle, -100.0f, 100.0f);
+            ImGui::SliderFloat("Rotation angle", &g_z_rot, -100.0f, 100.0f);
+            ImGui::SliderFloat3("Rotation", glm::value_ptr(g_rot), 0.0f, 1.0f);
+            ImGui::End();
+        }
+
+        if(g_poly_mode) {
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        } else {
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         }
 
         processInput(window);
@@ -265,30 +321,17 @@ int actual_program(int argc, char** argv)
 
         m.Draw(shader);
 
-        if(glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        {
-            g_y_pos += 0.01f;
-        }
-
-        if(glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        {
-            g_y_pos -= 0.01f;
-        }
-
-        if(glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        {
-            g_z_rot += 2.0f;
-        }
-
-        if(glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        {
-            g_z_rot -= 2.0f;
-        }
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+
+    glfwDestroyWindow(window);
     glfwTerminate();
 
     return PROGRAM_EXIT_SUCCESS;
