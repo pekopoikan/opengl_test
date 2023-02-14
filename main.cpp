@@ -20,6 +20,10 @@
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
 
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+
 #include "stb_image.h"
 
 bool g_poly_mode { false };
@@ -34,19 +38,17 @@ const unsigned int g_indices[] =
     #include "indices.inc"
 };
 
-glm::vec3 g_x(0.0f, 0.0f, 3.0f);
-glm::vec3 g_up(0.0f, 0.8f, 0.0f);
-glm::vec3 g_down(0.0f, 1.0f, 0.0f);
+glm::vec3 g_view(0.0f, 0.0f, -3.0f);
 
 glm::vec3 g_pos(0.0f, 0.0f, 0.0f);
 
 glm::vec3 g_rot(0.0f, 0.0f, 1.0f);
 
 glm::vec3 g_model(1.0f, 0.0f, 0.0f);
-float g_model_angle {-55.0f};
+float g_model_angle {0.0f};
 
 float g_z_rot { 0.0f };
-float g_camera_dis { 30.0f };
+float g_camera_dis { 45.0f };
 
 const unsigned int g_window_h { 500 };
 const unsigned int g_window_w { 1000 };
@@ -57,6 +59,26 @@ enum PROGRAM_EXIT
     PROGRAM_EXIT_FAILED = -1,
     PROGRAM_EXIT_EXCEPTION = -2
 };
+
+class ModelLoader
+{
+    private:
+        Assimp::Importer importer;
+    public:
+        ModelLoader(std::string&);
+};
+
+ModelLoader::ModelLoader(std::string& path)
+{
+    const aiScene* scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_FlipUVs);
+
+    if(!scene) {
+        fprintf(stdout, "Couldnt import model");
+    } else {
+        fprintf(stdout, "imported\n");
+        fprintf(stdout, "%f\n", scene->mMeshes[0]->mVertices[0].x);
+    }
+}
 
 class Mesh;
 
@@ -196,11 +218,13 @@ void Mesh::setupMeshes()
 
     glGenTextures(1, &TEX);
     glBindTexture(GL_TEXTURE_2D, TEX);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	// set texture wrapping to GL_REPEAT (default wrapping method)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    // set texture filtering parameters
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, glm::value_ptr(glm::vec4(15.0f, 0.0f, 0.0f, 1.0f)));
 
     data = stbi_load("container.jpg", &width, &height, &nrChannels, 0);
 
@@ -218,7 +242,7 @@ void Mesh::Draw(Shader& shader)
     glm::mat4 projection = glm::perspective(glm::radians(g_camera_dis), (float)g_window_w / (float)g_window_h, 0.1f, 100.0f);
 
     glm::mat4 look = glm::mat4(1.0f);
-    look = glm::lookAt(g_x, g_up, g_down);
+    look = glm::translate(look, g_view);
 
     glm::mat4 transl = glm::mat4(1.0f);
     transl = glm::translate(transl, g_pos);
@@ -235,14 +259,14 @@ void Mesh::Draw(Shader& shader)
     glUniformMatrix4fv(loc, 1, GL_FALSE, glm::value_ptr(look));
 
     glm::mat4 model = glm::mat4(1.0f);
-    model = glm::rotate(model, glm::radians(-55.0f), g_model);
+    model = glm::rotate(model, glm::radians(g_model_angle), g_model);
 
     glUniformMatrix4fv(glGetUniformLocation(shader.program, "model"), 1, GL_FALSE, glm::value_ptr(model));
 
     glBindTexture(GL_TEXTURE_2D, TEX);
     glBindVertexArray(VAO);
-    glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
-    //glDrawArrays(GL_TRIANGLES, 0, vertices.size());
+    //glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
+    glDrawArrays(GL_TRIANGLES, 0, vertices.size());
 }
 
 void turn_polygon_mode(int);
@@ -261,8 +285,8 @@ int actual_program(int argc, char** argv)
 
     gladLoadGLLoader((GLADloadproc) glfwGetProcAddress);
 
+    //glEnable(GL_TEXTURE);
     glEnable(GL_DEPTH_TEST);
-    glEnable(GL_TEXTURE);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -284,6 +308,9 @@ int actual_program(int argc, char** argv)
 
     glfwSetScrollCallback(window, handle_scroll);
 
+    std::string mdl("Darunia.obj");
+    ModelLoader test(mdl);
+
     while(!glfwWindowShouldClose(window))
     {
         ImGui_ImplOpenGL3_NewFrame();
@@ -297,14 +324,13 @@ int actual_program(int argc, char** argv)
                 turn_polygon_mode(0);
             }
             ImGui::SliderFloat("Camera Distance", &g_camera_dis, -100.0f, 100.0f, "%.3f");
-            ImGui::SliderFloat3("Right Vector", glm::value_ptr(g_x), -100.0f, 100.0f);
-            ImGui::SliderFloat3("Up Vector", glm::value_ptr(g_up), -100.0f, 100.0f);
-            ImGui::SliderFloat3("Down Vector", glm::value_ptr(g_down), -100.0f, 100.0f);
+            ImGui::SliderFloat3("View", glm::value_ptr(g_view), -100.0f, 100.0f);
             ImGui::SliderFloat3("Pos", glm::value_ptr(g_pos), -100.0f, 100.0f);
-            ImGui::SliderFloat3("Model", glm::value_ptr(g_model), 0.0f, 1.0f);
+            ImGui::SliderFloat3("Model", glm::value_ptr(g_model), -1.0f, 1.0f);
             ImGui::SliderFloat("Model angle", &g_model_angle, -100.0f, 100.0f);
             ImGui::SliderFloat("Rotation angle", &g_z_rot, -100.0f, 100.0f);
             ImGui::SliderFloat3("Rotation", glm::value_ptr(g_rot), 0.0f, 1.0f);
+            ImGui::Button("Save Changes");
             ImGui::End();
         }
 
