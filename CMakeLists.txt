@@ -10,6 +10,7 @@ set(stb stb_image.h stb_image.cpp)
 add_library(stb_lib ${stb})
 
 add_executable(opengl ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
+#add_executable(opengl glad.c)
 add_executable(opengl main.cpp)
 
 target_link_libraries(opengl PRIVATE assimp::assimp)
@@ -27,4 +28,6 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/fshader.fs DESTINATION ${CMAKE_CURRENT_BIN
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/vshader.vs DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/wall.jpg DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/container.jpg DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/Darunia.mtl DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/Darunia.obj DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/Darunai.PNG DESTINATION ${CMAKE_CURRENT_BINARY_DIR})

@@ -44,7 +44,7 @@ glm::vec3 g_pos(0.0f, 0.0f, 0.0f);
 
 glm::vec3 g_rot(0.0f, 0.0f, 1.0f);
 
-glm::vec3 g_model(1.0f, 0.0f, 0.0f);
+glm::vec3 g_model(0.0f, 1.0f, 0.0f);
 float g_model_angle {0.0f};
 
 float g_z_rot { 0.0f };
@@ -60,23 +60,107 @@ enum PROGRAM_EXIT
     PROGRAM_EXIT_EXCEPTION = -2
 };
 
+struct Texture
+{
+    unsigned int id;
+    std::string type;
+    std::string path;
+};
+
 class ModelLoader
 {
     private:
         Assimp::Importer importer;
     public:
-        ModelLoader(std::string&);
+        ModelLoader(std::string&, std::vector<float>&, std::vector<unsigned int>&, std::vector<Texture>&);
 };
 
-ModelLoader::ModelLoader(std::string& path)
+ModelLoader::ModelLoader(std::string& path, std::vector<float>& vertices, std::vector<unsigned int>& indices,
+std::vector<Texture>& textures)
 {
-    const aiScene* scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_FlipUVs);
+    const aiScene* scene = importer.ReadFile(path, aiProcessPreset_TargetRealtime_Quality);
 
     if(!scene) {
         fprintf(stdout, "Couldnt import model");
     } else {
-        fprintf(stdout, "imported\n");
-        fprintf(stdout, "%f\n", scene->mMeshes[0]->mVertices[0].x);
+        for(int i = 0; i < scene->mNumMeshes; i++)
+        {
+            for(int _v = 0; _v < scene->mMeshes[i]->mNumVertices; _v++)
+            {
+                vertices.push_back(scene->mMeshes[i]->mVertices[_v].x);
+                vertices.push_back(scene->mMeshes[i]->mVertices[_v].y);
+                vertices.push_back(scene->mMeshes[i]->mVertices[_v].z);
+
+                
+                vertices.push_back(scene->mMeshes[i]->mNormals[_v].x);
+                vertices.push_back(scene->mMeshes[i]->mNormals[_v].y);
+                vertices.push_back(scene->mMeshes[i]->mNormals[_v].z);
+
+                if(scene->mMeshes[i]->mTextureCoords[0]) {
+                    vertices.push_back(scene->mMeshes[i]->mTextureCoords[0][_v].x);
+                    vertices.push_back(scene->mMeshes[i]->mTextureCoords[0][_v].y);
+                } else {
+                    vertices.push_back(0.0f);
+                    vertices.push_back(0.0f);
+                }
+           }
+
+           for(unsigned int n = 0; n < scene->mMeshes[i]->mNumFaces; n++)
+           {
+                aiFace face = scene->mMeshes[i]->mFaces[n];
+                for(unsigned int j = 0; j < face.mNumIndices; j++)
+                    indices.push_back(face.mIndices[j]);
+           }
+
+           std::vector<aiTextureType> types { aiTextureType_DIFFUSE, aiTextureType_SPECULAR, aiTextureType_AMBIENT, aiTextureType_HEIGHT };
+           
+           aiMaterial* m = scene->mMaterials[scene->mMeshes[i]->mMaterialIndex];
+
+           for(auto type : types)
+           {
+                for(unsigned int k = 0; k < m->GetTextureCount(type); k++)
+                {
+                    //fprintf(stdout, "count %i", m->GetTextureCount(type));
+                    aiString str;
+                    m->GetTexture(type, k, &str);
+
+                    unsigned int textureID;
+                    glGenTextures(1, &textureID);
+
+                    int width, height, nr; 
+                    fprintf(stdout, "%s", str.C_Str());
+                    unsigned char* data = stbi_load(str.C_Str(), &width, &height, &nr, 0);
+
+                    if(data) {
+                        GLenum format;
+
+                        if(nr == 1) format = GL_RED;
+                        else if(nr == 3) format = GL_RGB;
+                        else if(nr == 4) format = GL_RGBA;
+
+                        glBindTexture(GL_TEXTURE_2D, textureID);
+                        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+                        glGenerateMipmap(GL_TEXTURE_2D);
+
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+                        stbi_image_free(data);
+                    } else {
+                        fprintf(stdout, "couldnt load texture");
+                        stbi_image_free(data);
+                    }
+
+                    Texture tex;
+                    tex.id = textureID;
+                    tex.type = type == aiTextureType_DIFFUSE ? "texture_diffuse" : type == aiTextureType_SPECULAR ? "texture_specular" : type == aiTextureType_HEIGHT ? "texture_normal" : "texture_height";
+                    tex.path = str.C_Str();
+                    textures.push_back(tex);
+                }
+           }
+        }
     }
 }
 
@@ -173,8 +257,8 @@ void Shader::setupShader()
 class Mesh
 {
     public:
-        Mesh(std::vector<float>& vertices, std::vector<unsigned int>& indices)
-        : vertices(vertices), indices(indices)
+        Mesh(std::vector<float>& vertices, std::vector<unsigned int>& indices, std::vector<Texture>& textures)
+        : vertices(vertices), indices(indices), textures(textures)
         {
             setupMeshes();
         };
@@ -183,7 +267,6 @@ class Mesh
             glDeleteBuffers(1, &VBO);
             glDeleteBuffers(1, &EBO);
             glDeleteVertexArrays(1, &VAO);
-            glDeleteTextures(1, &TEX);
         };
     public:
         void Draw(class Shader&);
@@ -192,7 +275,8 @@ class Mesh
     private:
         std::vector<float> vertices;
         std::vector<unsigned int> indices;
-        unsigned int VAO, VBO, EBO, TEX;
+        std::vector<Texture> textures;
+        unsigned int VAO, VBO, EBO;
         int width, height, nrChannels;
         unsigned char* data;
 };
@@ -211,30 +295,15 @@ void Mesh::setupMeshes()
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), &indices[0], GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*) 0);
+    //coord
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*) 0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*) (3 * sizeof(float)));
+    //normals
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*) (3 * sizeof(float)));
     glEnableVertexAttribArray(1);
-
-    glGenTextures(1, &TEX);
-    glBindTexture(GL_TEXTURE_2D, TEX);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, glm::value_ptr(glm::vec4(15.0f, 0.0f, 0.0f, 1.0f)));
-
-    data = stbi_load("container.jpg", &width, &height, &nrChannels, 0);
-
-    if(data) {
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-        glGenerateMipmap(GL_TEXTURE_2D);
-    } else {
-        fprintf(stdout, "error");
-    }
-    stbi_image_free(data);
+    //text
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*) (6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
 }
 
 void Mesh::Draw(Shader& shader)
@@ -244,12 +313,16 @@ void Mesh::Draw(Shader& shader)
     glm::mat4 look = glm::mat4(1.0f);
     look = glm::translate(look, g_view);
 
+    glm::mat4 scale = glm::mat4(1.0f);
+    scale = glm::scale(scale, glm::vec3(0.005f, 0.005f, 0.005f));
+
     glm::mat4 transl = glm::mat4(1.0f);
     transl = glm::translate(transl, g_pos);
 
     glUseProgram(shader.program);
 
     unsigned int locy = glGetUniformLocation(shader.program, "transformation");
+    transl *= scale;
     glUniformMatrix4fv(locy, 1, GL_FALSE, glm::value_ptr(transl));
 
     unsigned int loc1 = glGetUniformLocation(shader.program, "projection");
@@ -263,10 +336,22 @@ void Mesh::Draw(Shader& shader)
 
     glUniformMatrix4fv(glGetUniformLocation(shader.program, "model"), 1, GL_FALSE, glm::value_ptr(model));
 
-    glBindTexture(GL_TEXTURE_2D, TEX);
+    unsigned int diffuseNr  = 1;
+    unsigned int specularNr = 1;
+    unsigned int normalNr   = 1;
+    unsigned int heightNr   = 1;
+
+    for(unsigned int i = 0; i < textures.size(); i++)
+    {
+        glActiveTexture(GL_TEXTURE0 + i);
+        glBindTexture(GL_TEXTURE_2D, textures[i].id);
+    }
+
     glBindVertexArray(VAO);
-    //glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
-    glDrawArrays(GL_TRIANGLES, 0, vertices.size());
+    //glDrawArrays(GL_TRIANGLES, 0, vertices.size());
+    glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+    glActiveTexture(0);
 }
 
 void turn_polygon_mode(int);
@@ -298,18 +383,19 @@ int actual_program(int argc, char** argv)
 
     std::vector<float> v;
     std::vector<unsigned int> i;
+    std::vector<Texture> t;
 
-    std::copy(&g_vertices[0], &g_vertices[sizeof(g_vertices) / sizeof(g_vertices[0])], std::back_inserter(v));
-    std::copy(&g_indices[0], &g_indices[sizeof(g_indices) / sizeof(g_indices[0])], std::back_inserter(i));
+    //std::copy(&g_vertices[0], &g_vertices[sizeof(g_vertices) / sizeof(g_vertices[0])], std::back_inserter(v));
+    //std::copy(&g_indices[0], &g_indices[sizeof(g_indices) / sizeof(g_indices[0])], std::back_inserter(i));
+
+    std::string mdl("Darunia.obj");
+    ModelLoader test(mdl, v, i, t);
 
     Shader shader("vshader.vs", "fshader.fs");
 
-    Mesh m(v, i);
+    Mesh m(v, i, t);
 
     glfwSetScrollCallback(window, handle_scroll);
-
-    std::string mdl("Darunia.obj");
-    ModelLoader test(mdl);
 
     while(!glfwWindowShouldClose(window))
     {
