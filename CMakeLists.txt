@@ -10,12 +10,12 @@ set(stb stb_image.h stb_image.cpp)
 add_library(stb_lib ${stb})
 
 add_executable(opengl ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
-#add_executable(opengl glad.c)
 add_executable(opengl main.cpp)
 
-target_link_libraries(opengl PRIVATE assimp::assimp)
+target_link_libraries(opengl PRIVATE assimp)
 target_link_libraries(opengl PRIVATE glfw)
 target_link_libraries(opengl PRIVATE stb_lib)
+target_link_libraries(opengl PUBLIC glfw OpenGL::GL ${CMAKE_DL_LIBS})
 
 target_sources(opengl PRIVATE glad.c)
 

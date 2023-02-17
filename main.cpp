@@ -38,6 +38,8 @@ const unsigned int g_indices[] =
     #include "indices.inc"
 };
 
+glm::vec3 g_scale(0.005f, 0.005f, 0.005f);
+
 glm::vec3 g_view(0.0f, 0.0f, -3.0f);
 
 glm::vec3 g_pos(0.0f, 0.0f, 0.0f);
@@ -60,120 +62,13 @@ enum PROGRAM_EXIT
     PROGRAM_EXIT_EXCEPTION = -2
 };
 
-struct Texture
-{
-    unsigned int id;
-    std::string type;
-    std::string path;
-};
-
-class ModelLoader
-{
-    private:
-        Assimp::Importer importer;
-    public:
-        ModelLoader(std::string&, std::vector<float>&, std::vector<unsigned int>&, std::vector<Texture>&);
-};
-
-ModelLoader::ModelLoader(std::string& path, std::vector<float>& vertices, std::vector<unsigned int>& indices,
-std::vector<Texture>& textures)
-{
-    const aiScene* scene = importer.ReadFile(path, aiProcessPreset_TargetRealtime_Quality);
-
-    if(!scene) {
-        fprintf(stdout, "Couldnt import model");
-    } else {
-        for(int i = 0; i < scene->mNumMeshes; i++)
-        {
-            for(int _v = 0; _v < scene->mMeshes[i]->mNumVertices; _v++)
-            {
-                vertices.push_back(scene->mMeshes[i]->mVertices[_v].x);
-                vertices.push_back(scene->mMeshes[i]->mVertices[_v].y);
-                vertices.push_back(scene->mMeshes[i]->mVertices[_v].z);
-
-                
-                vertices.push_back(scene->mMeshes[i]->mNormals[_v].x);
-                vertices.push_back(scene->mMeshes[i]->mNormals[_v].y);
-                vertices.push_back(scene->mMeshes[i]->mNormals[_v].z);
-
-                if(scene->mMeshes[i]->mTextureCoords[0]) {
-                    vertices.push_back(scene->mMeshes[i]->mTextureCoords[0][_v].x);
-                    vertices.push_back(scene->mMeshes[i]->mTextureCoords[0][_v].y);
-                } else {
-                    vertices.push_back(0.0f);
-                    vertices.push_back(0.0f);
-                }
-           }
-
-           for(unsigned int n = 0; n < scene->mMeshes[i]->mNumFaces; n++)
-           {
-                aiFace face = scene->mMeshes[i]->mFaces[n];
-                for(unsigned int j = 0; j < face.mNumIndices; j++)
-                    indices.push_back(face.mIndices[j]);
-           }
-
-           std::vector<aiTextureType> types { aiTextureType_DIFFUSE, aiTextureType_SPECULAR, aiTextureType_AMBIENT, aiTextureType_HEIGHT };
-           
-           aiMaterial* m = scene->mMaterials[scene->mMeshes[i]->mMaterialIndex];
-
-           for(auto type : types)
-           {
-                for(unsigned int k = 0; k < m->GetTextureCount(type); k++)
-                {
-                    //fprintf(stdout, "count %i", m->GetTextureCount(type));
-                    aiString str;
-                    m->GetTexture(type, k, &str);
-
-                    unsigned int textureID;
-                    glGenTextures(1, &textureID);
-
-                    int width, height, nr; 
-                    fprintf(stdout, "%s", str.C_Str());
-                    unsigned char* data = stbi_load(str.C_Str(), &width, &height, &nr, 0);
-
-                    if(data) {
-                        GLenum format;
-
-                        if(nr == 1) format = GL_RED;
-                        else if(nr == 3) format = GL_RGB;
-                        else if(nr == 4) format = GL_RGBA;
-
-                        glBindTexture(GL_TEXTURE_2D, textureID);
-                        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
-                        glGenerateMipmap(GL_TEXTURE_2D);
-
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-                        stbi_image_free(data);
-                    } else {
-                        fprintf(stdout, "couldnt load texture");
-                        stbi_image_free(data);
-                    }
-
-                    Texture tex;
-                    tex.id = textureID;
-                    tex.type = type == aiTextureType_DIFFUSE ? "texture_diffuse" : type == aiTextureType_SPECULAR ? "texture_specular" : type == aiTextureType_HEIGHT ? "texture_normal" : "texture_height";
-                    tex.path = str.C_Str();
-                    textures.push_back(tex);
-                }
-           }
-        }
-    }
-}
-
-class Mesh;
-
 class Shader
 {
-    friend Mesh;
-
     typedef std::map<const char*, glm::mat4> trans_mat;
-
+    public:
+        unsigned int program;
     private:
-        unsigned int vertex_shader, fragment_shader, program;
+        unsigned int vertex_shader, fragment_shader;
         std::string vertex_context;
         std::string fragment_context;
         std::map<const char*, glm::mat4> transformation_matrices;
@@ -186,8 +81,6 @@ class Shader
             setupShader();
         };
         ~Shader();
-    public:
-        void addTransformation(const char*, glm::mat4&);
     private:
         void setupContext(const char*, std::string&);
         void setupShader();
@@ -196,14 +89,6 @@ class Shader
 Shader::~Shader()
 {
     glDeleteProgram(program);
-}
-
-void Shader::addTransformation(const char* name, glm::mat4& mat)
-{
-    //if(transformation_matrices.find(name) == transformation_matrices.end())
-    //{
-        //transformation_matrices.insert(std::make_pair(name, mat));
-    //}
 }
 
 void Shader::setupContext(const char* file_name, std::string& context)
@@ -254,35 +139,40 @@ void Shader::setupShader()
 
 }
 
+struct Vertex
+{
+    glm::vec3 Position;
+    glm::vec3 Normals;
+    glm::vec2 Coordinates;
+};
+
+struct Texture
+{
+    unsigned int id;
+};
+
 class Mesh
 {
     public:
-        Mesh(std::vector<float>& vertices, std::vector<unsigned int>& indices, std::vector<Texture>& textures)
-        : vertices(vertices), indices(indices), textures(textures)
+        std::vector<Vertex> vertices;
+        std::vector<Texture> textures;
+        std::vector<unsigned int> indices;
+    public:
+        Mesh()
         {
-            setupMeshes();
-        };
-        ~Mesh()
-        {
-            glDeleteBuffers(1, &VBO);
-            glDeleteBuffers(1, &EBO);
-            glDeleteVertexArrays(1, &VAO);
+            fprintf(stdout, "Mesh constructor called\n");
         };
     public:
-        void Draw(class Shader&);
+        void Draw(Shader&);
+        void setup();
     private:
-        void setupMeshes();
-    private:
-        std::vector<float> vertices;
-        std::vector<unsigned int> indices;
-        std::vector<Texture> textures;
         unsigned int VAO, VBO, EBO;
-        int width, height, nrChannels;
-        unsigned char* data;
 };
 
-void Mesh::setupMeshes()
+void Mesh::setup()
 {
+    fprintf(stdout, "vertices size %i\n", vertices.size());
+
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     glGenBuffers(1, &EBO);
@@ -290,52 +180,25 @@ void Mesh::setupMeshes()
     glBindVertexArray(VAO);
 
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), &vertices[0], GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), &vertices[0], GL_STATIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), &indices[0], GL_STATIC_DRAW);
 
-    //coord
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*) 0);
     glEnableVertexAttribArray(0);
-    //normals
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*) (3 * sizeof(float)));
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*) 0);
+
     glEnableVertexAttribArray(1);
-    //text
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*) (6 * sizeof(float)));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*) offsetof(Vertex, Normals));
+
     glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*) offsetof(Vertex, Coordinates));
+
+    glBindVertexArray(0);
 }
 
 void Mesh::Draw(Shader& shader)
 {
-    glm::mat4 projection = glm::perspective(glm::radians(g_camera_dis), (float)g_window_w / (float)g_window_h, 0.1f, 100.0f);
-
-    glm::mat4 look = glm::mat4(1.0f);
-    look = glm::translate(look, g_view);
-
-    glm::mat4 scale = glm::mat4(1.0f);
-    scale = glm::scale(scale, glm::vec3(0.005f, 0.005f, 0.005f));
-
-    glm::mat4 transl = glm::mat4(1.0f);
-    transl = glm::translate(transl, g_pos);
-
-    glUseProgram(shader.program);
-
-    unsigned int locy = glGetUniformLocation(shader.program, "transformation");
-    transl *= scale;
-    glUniformMatrix4fv(locy, 1, GL_FALSE, glm::value_ptr(transl));
-
-    unsigned int loc1 = glGetUniformLocation(shader.program, "projection");
-    glUniformMatrix4fv(loc1, 1, GL_FALSE, glm::value_ptr(projection));
-
-    unsigned int loc = glGetUniformLocation(shader.program, "view");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, glm::value_ptr(look));
-
-    glm::mat4 model = glm::mat4(1.0f);
-    model = glm::rotate(model, glm::radians(g_model_angle), g_model);
-
-    glUniformMatrix4fv(glGetUniformLocation(shader.program, "model"), 1, GL_FALSE, glm::value_ptr(model));
-
     unsigned int diffuseNr  = 1;
     unsigned int specularNr = 1;
     unsigned int normalNr   = 1;
@@ -348,10 +211,135 @@ void Mesh::Draw(Shader& shader)
     }
 
     glBindVertexArray(VAO);
-    //glDrawArrays(GL_TRIANGLES, 0, vertices.size());
     glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
     glActiveTexture(0);
+}
+
+class Model
+{
+    private:
+        std::vector<Mesh> meshes;
+    public:
+        void loadModel(std::string&);
+        void Draw(Shader&);
+    private:
+        Mesh processMesh(aiMesh*, const aiScene*);
+};
+
+void Model::loadModel(std::string& path)
+{
+    Assimp::Importer importer;
+    const aiScene* scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_GenSmoothNormals | aiProcess_FlipUVs);
+
+    if(!scene) {
+        fprintf(stdout, "Couldnt import model file\n");
+    } else {
+        for(unsigned i = 0; i < scene->mNumMeshes; i++)
+        {
+            meshes.push_back(processMesh(scene->mMeshes[i], scene));
+        }
+    }
+
+    fprintf(stdout, "Meshes size %i\n", meshes.size());
+}
+
+Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
+{
+    Mesh m;
+
+    // vertices
+    for(unsigned int i = 0; i < mesh->mNumVertices; i++)
+    {
+        Vertex vertex;
+
+        vertex.Position.x = mesh->mVertices[i].x;
+        vertex.Position.y = mesh->mVertices[i].y;
+        vertex.Position.z = mesh->mVertices[i].z;
+
+        if(mesh->HasNormals())
+        {
+            vertex.Normals.x = mesh->mNormals[i].x;
+            vertex.Normals.y = mesh->mNormals[i].y;
+            vertex.Normals.z = mesh->mNormals[i].z;
+        }
+
+        if(mesh->mTextureCoords[0]) {
+            vertex.Coordinates.x = mesh->mTextureCoords[0][i].x;
+            vertex.Coordinates.y = mesh->mTextureCoords[0][i].y;
+        } else {
+            vertex.Coordinates = glm::vec2(0.0f, 0.0f);
+        }
+
+        m.vertices.push_back(vertex);
+    }
+
+    //loading textures
+    aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
+    std::map<aiTextureType, const char*> tex_types = {
+        {aiTextureType_DIFFUSE, "texture_diffuse"},
+        {aiTextureType_SPECULAR, "texture_specular"},
+        {aiTextureType_HEIGHT, "texture_height"},
+        {aiTextureType_AMBIENT, "texture_normal"}};
+
+    for(std::pair<aiTextureType, const char*> p : tex_types)
+    {
+        for(unsigned int i = 0; i < material->GetTextureCount(p.first); i++)
+        {
+            aiString str;
+            material->GetTexture(p.first, i, &str);
+
+            Texture tex;
+
+            unsigned int texID;
+            glGenTextures(1, &texID); //
+
+            int w, h, nr;
+
+            unsigned char* data = stbi_load(str.C_Str(), &w, &h, &nr, 0);
+
+            if(data) {
+                glBindTexture(GL_TEXTURE_2D, texID);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+                glGenerateMipmap(GL_TEXTURE_2D);
+                
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            } else {
+                fprintf(stdout, "Failed to load texture\n");
+            }
+
+            stbi_image_free(data);
+
+            tex.id = texID;
+
+            m.textures.push_back(tex);
+        }
+    }
+
+    // indices
+    for(unsigned int f = 0; f < mesh->mNumFaces; f++)
+    {
+        aiFace face = mesh->mFaces[f];
+        for(unsigned int _f = 0; _f < face.mNumIndices; _f++)
+        {
+            m.indices.push_back(face.mIndices[_f]);
+        }
+    }
+
+    m.setup();
+
+    return m;
+}
+
+void Model::Draw(Shader& shader)
+{
+    for(unsigned int i = 0; i < meshes.size(); i++)
+    {
+        meshes[i].Draw(shader);
+    }
 }
 
 void turn_polygon_mode(int);
@@ -389,11 +377,11 @@ int actual_program(int argc, char** argv)
     //std::copy(&g_indices[0], &g_indices[sizeof(g_indices) / sizeof(g_indices[0])], std::back_inserter(i));
 
     std::string mdl("Darunia.obj");
-    ModelLoader test(mdl, v, i, t);
 
     Shader shader("vshader.vs", "fshader.fs");
 
-    Mesh m(v, i, t);
+    Model m;
+    m.loadModel(mdl);
 
     glfwSetScrollCallback(window, handle_scroll);
 
@@ -412,6 +400,7 @@ int actual_program(int argc, char** argv)
             ImGui::SliderFloat("Camera Distance", &g_camera_dis, -100.0f, 100.0f, "%.3f");
             ImGui::SliderFloat3("View", glm::value_ptr(g_view), -100.0f, 100.0f);
             ImGui::SliderFloat3("Pos", glm::value_ptr(g_pos), -100.0f, 100.0f);
+            ImGui::SliderFloat3("Scale", glm::value_ptr(g_scale), -100.0f, 100.0f);
             ImGui::SliderFloat3("Model", glm::value_ptr(g_model), -1.0f, 1.0f);
             ImGui::SliderFloat("Model angle", &g_model_angle, -100.0f, 100.0f);
             ImGui::SliderFloat("Rotation angle", &g_z_rot, -100.0f, 100.0f);
@@ -430,6 +419,28 @@ int actual_program(int argc, char** argv)
 
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        glUseProgram(shader.program);
+
+        glm::mat4 projection = glm::perspective(glm::radians(g_camera_dis), (float) g_window_w / (float) g_window_h, 0.1f, 100.0f);
+        glm::mat4 view = glm::mat4(1.0f);
+        view = glm::translate(view, g_view);
+        glm::mat4 translate = glm::mat4(1.0f);
+        translate = glm::translate(translate, g_pos);
+        glm::mat4 scale = glm::mat4(1.0f);
+        scale = glm::scale(scale, g_scale);
+        translate *= scale;
+        glm::mat4 model = glm::mat4(1.0f);
+        model = glm::rotate(model, glm::radians(g_model_angle), g_model);
+
+        unsigned int l_transformation = glGetUniformLocation(shader.program, "transformation");
+        glUniformMatrix4fv(l_transformation, 1, GL_FALSE, glm::value_ptr(translate));
+        unsigned int l_projection = glGetUniformLocation(shader.program, "projection");
+        glUniformMatrix4fv(l_projection, 1, GL_FALSE, glm::value_ptr(projection));
+        unsigned int l_view = glGetUniformLocation(shader.program, "view");
+        glUniformMatrix4fv(l_view, 1, GL_FALSE, glm::value_ptr(view));
+        unsigned int l_model = glGetUniformLocation(shader.program, "model");
+        glUniformMatrix4fv(l_model, 1, GL_FALSE, glm::value_ptr(model));
 
         m.Draw(shader);
 
