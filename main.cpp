@@ -28,14 +28,24 @@
 
 bool g_poly_mode { false };
 
-const float g_vertices[] =
-{
+const float g_vertices[] = {
     #include "vertices.inc"
 };
 
-const unsigned int g_indices[] =
-{
+const unsigned int g_indices[] = {
     #include "indices.inc"
+};
+
+const float g_v_o[] = {
+    0.5f,  0.5f, 0.0f,
+    0.5f, -0.5f, 0.0f,  
+    -0.5f, -0.5f, 0.0f,
+    -0.5f,  0.5f, 0.0f 
+};
+
+const unsigned int g_i_o[] = {
+    0, 1, 3,
+    1, 2, 3
 };
 
 glm::vec3 g_scale(0.005f, 0.005f, 0.005f);
@@ -52,8 +62,8 @@ float g_model_angle {0.0f};
 float g_z_rot { 0.0f };
 float g_camera_dis { 45.0f };
 
-const unsigned int g_window_h { 500 };
-const unsigned int g_window_w { 1000 };
+unsigned int g_window_h { 500 };
+unsigned int g_window_w { 1000 };
 
 enum PROGRAM_EXIT
 {
@@ -64,14 +74,12 @@ enum PROGRAM_EXIT
 
 class Shader
 {
-    typedef std::map<const char*, glm::mat4> trans_mat;
     public:
         unsigned int program;
     private:
         unsigned int vertex_shader, fragment_shader;
         std::string vertex_context;
         std::string fragment_context;
-        std::map<const char*, glm::mat4> transformation_matrices;
     public:
         Shader(const char* vertex_file, const char* fragment_file)
         {
@@ -88,7 +96,7 @@ class Shader
 
 Shader::~Shader()
 {
-    glDeleteProgram(program);
+    //glDeleteProgram(program);
 }
 
 void Shader::setupContext(const char* file_name, std::string& context)
@@ -133,10 +141,6 @@ void Shader::setupShader()
     glAttachShader(program, fragment_shader);
 
     glLinkProgram(program);
-
-    glDeleteShader(vertex_shader);
-    glDeleteShader(fragment_shader);
-
 }
 
 struct Vertex
@@ -162,6 +166,10 @@ class Mesh
         {
             fprintf(stdout, "Mesh constructor called\n");
         };
+        ~Mesh()
+        {
+            fprintf(stdout, "Mesh descrtuctor called\n");
+        }
     public:
         void Draw(Shader&);
         void setup();
@@ -199,11 +207,6 @@ void Mesh::setup()
 
 void Mesh::Draw(Shader& shader)
 {
-    unsigned int diffuseNr  = 1;
-    unsigned int specularNr = 1;
-    unsigned int normalNr   = 1;
-    unsigned int heightNr   = 1;
-
     for(unsigned int i = 0; i < textures.size(); i++)
     {
         glActiveTexture(GL_TEXTURE0 + i);
@@ -220,6 +223,12 @@ class Model
 {
     private:
         std::vector<Mesh> meshes;
+    public:
+        Model() = default;
+        ~Model()
+        {
+            fprintf(stdout, "Model destructor called\n");
+        }
     public:
         void loadModel(std::string&);
         void Draw(Shader&);
@@ -292,15 +301,20 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
             Texture tex;
 
             unsigned int texID;
-            glGenTextures(1, &texID); //
+            glGenTextures(1, &texID);
 
             int w, h, nr;
 
             unsigned char* data = stbi_load(str.C_Str(), &w, &h, &nr, 0);
 
             if(data) {
+                GLenum format;
+                if(nr == 1) format = GL_RED;
+                if(nr == 3) format = GL_RGB;
+                if(nr == 4) format = GL_RGBA;
+
                 glBindTexture(GL_TEXTURE_2D, texID);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+                glTexImage2D(GL_TEXTURE_2D, 0, format, w, h, 0, format, GL_UNSIGNED_BYTE, data);
                 glGenerateMipmap(GL_TEXTURE_2D);
                 
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -345,6 +359,7 @@ void Model::Draw(Shader& shader)
 void turn_polygon_mode(int);
 void processInput(GLFWwindow*);
 void handle_scroll(GLFWwindow*, double, double);
+void frame(GLFWwindow*, int, int);
 
 int actual_program(int argc, char** argv)
 {
@@ -355,6 +370,7 @@ int actual_program(int argc, char** argv)
     GLFWwindow* window = glfwCreateWindow(g_window_w, g_window_h, "Window", NULL, NULL);
 
     glfwMakeContextCurrent(window);
+    glfwSetFramebufferSizeCallback(window, frame);
 
     gladLoadGLLoader((GLADloadproc) glfwGetProcAddress);
 
@@ -376,12 +392,11 @@ int actual_program(int argc, char** argv)
     //std::copy(&g_vertices[0], &g_vertices[sizeof(g_vertices) / sizeof(g_vertices[0])], std::back_inserter(v));
     //std::copy(&g_indices[0], &g_indices[sizeof(g_indices) / sizeof(g_indices[0])], std::back_inserter(i));
 
-    std::string mdl("Darunia.obj");
-
     Shader shader("vshader.vs", "fshader.fs");
+    Shader titi("voverlayshader.vs", "foverlayshader.fs");
 
-    Model m;
-    m.loadModel(mdl);
+    char model_buff[256] = "";
+    std::map<const char*, Model*> models;
 
     glfwSetScrollCallback(window, handle_scroll);
 
@@ -397,12 +412,28 @@ int actual_program(int argc, char** argv)
             {
                 turn_polygon_mode(0);
             }
+
+            ImGui::InputText("Model name", model_buff, IM_ARRAYSIZE(model_buff));
+            if(ImGui::Button("Import Model"))
+            {
+                if(models.find(model_buff) == models.end()) {
+                    std::string t = std::string(model_buff);
+                    Model* n = new Model();
+                    n->loadModel(t);
+                    models.insert(std::make_pair<const char*, Model*>(model_buff, static_cast<Model*>(n)));
+                } else {
+                    models.erase(model_buff);
+                }
+
+                memset(model_buff, 0, IM_ARRAYSIZE(model_buff));
+            }
+
             ImGui::SliderFloat("Camera Distance", &g_camera_dis, -100.0f, 100.0f, "%.3f");
             ImGui::SliderFloat3("View", glm::value_ptr(g_view), -100.0f, 100.0f);
             ImGui::SliderFloat3("Pos", glm::value_ptr(g_pos), -100.0f, 100.0f);
             ImGui::SliderFloat3("Scale", glm::value_ptr(g_scale), -100.0f, 100.0f);
             ImGui::SliderFloat3("Model", glm::value_ptr(g_model), -1.0f, 1.0f);
-            ImGui::SliderFloat("Model angle", &g_model_angle, -100.0f, 100.0f);
+            ImGui::SliderFloat("Model angle", &g_model_angle, -180.0f, 180.0f);
             ImGui::SliderFloat("Rotation angle", &g_z_rot, -100.0f, 100.0f);
             ImGui::SliderFloat3("Rotation", glm::value_ptr(g_rot), 0.0f, 1.0f);
             ImGui::Button("Save Changes");
@@ -442,7 +473,14 @@ int actual_program(int argc, char** argv)
         unsigned int l_model = glGetUniformLocation(shader.program, "model");
         glUniformMatrix4fv(l_model, 1, GL_FALSE, glm::value_ptr(model));
 
-        m.Draw(shader);
+        //m->Draw(shader);
+        for(std::pair<const char*, Model*> p : models)
+        {
+            if(p.second)
+            {
+                p.second->Draw(shader);
+            }
+        }
 
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -486,4 +524,12 @@ void processInput(GLFWwindow* window)
 void handle_scroll(GLFWwindow* window, double x, double y)
 {
     g_camera_dis -= y;
+}
+
+void frame(GLFWwindow* window, int width, int height)
+{
+    g_window_h = height;
+    g_window_w = width;
+
+    glViewport(0,0, g_window_w, g_window_h);
 }
