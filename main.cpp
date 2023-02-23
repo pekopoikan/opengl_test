@@ -224,7 +224,10 @@ class Model
     private:
         std::vector<Mesh> meshes;
     public:
-        Model() = default;
+        Model()
+        {
+            setupOverlay();
+        };
         ~Model()
         {
             fprintf(stdout, "Model destructor called\n");
@@ -234,7 +237,43 @@ class Model
         void Draw(Shader&);
     private:
         Mesh processMesh(aiMesh*, const aiScene*);
+    //
+    public:
+        void setupOverlay();
+        void DrawOverlay();
+    private:
+        unsigned int VAO, VBO, EBO;
+        const Shader* const s = new Shader("voverlayshader.vs", "foverlayshader.fs");
 };
+
+void Model::setupOverlay()
+{
+    fprintf(stdout, "Overlay setup");
+
+    glGenVertexArrays(1, &VAO);
+    glGenBuffers(1, &VBO);
+    glGenBuffers(1, &EBO);
+
+    glBindVertexArray(VAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(g_v_o), g_v_o, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(g_i_o), g_i_o, GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*) 0);
+    glBindVertexArray(0);
+}
+
+void Model::DrawOverlay()
+{
+    glUseProgram(s->program);
+    glBindVertexArray(VAO);
+    glDrawElements(GL_TRIANGLES, 1, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+}
 
 void Model::loadModel(std::string& path)
 {
@@ -242,7 +281,7 @@ void Model::loadModel(std::string& path)
     const aiScene* scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_GenSmoothNormals | aiProcess_FlipUVs);
 
     if(!scene) {
-        fprintf(stdout, "Couldnt import model file\n");
+        fprintf(stdout, "Couldnt import model file\n%s\n", importer.GetErrorString());
     } else {
         for(unsigned i = 0; i < scene->mNumMeshes; i++)
         {
@@ -256,6 +295,17 @@ void Model::loadModel(std::string& path)
 Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 {
     Mesh m;
+
+    if(mesh->HasBones())
+    {
+        fprintf(stdout, ("%s has bones \n"), mesh->mName.C_Str());
+        mesh->mBones
+    }
+
+    if(scene->HasAnimations())
+    {
+        fprintf(stdout, "has animations\n");
+    }
 
     // vertices
     for(unsigned int i = 0; i < mesh->mNumVertices; i++)
@@ -286,10 +336,10 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
     //loading textures
     aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
     std::map<aiTextureType, const char*> tex_types = {
-        {aiTextureType_DIFFUSE, "texture_diffuse"},
-        {aiTextureType_SPECULAR, "texture_specular"},
-        {aiTextureType_HEIGHT, "texture_height"},
-        {aiTextureType_AMBIENT, "texture_normal"}};
+        {aiTextureType_DIFFUSE, "texture_diffuse"}
+        /*{aiTextureType_SPECULAR, "texture_specular"}*/
+        /*{aiTextureType_HEIGHT, "texture_height"}*/
+        /*{aiTextureType_AMBIENT, "texture_normal"}*/};
 
     for(std::pair<aiTextureType, const char*> p : tex_types)
     {
@@ -354,6 +404,8 @@ void Model::Draw(Shader& shader)
     {
         meshes[i].Draw(shader);
     }
+
+    DrawOverlay();
 }
 
 void turn_polygon_mode(int);
@@ -393,7 +445,6 @@ int actual_program(int argc, char** argv)
     //std::copy(&g_indices[0], &g_indices[sizeof(g_indices) / sizeof(g_indices[0])], std::back_inserter(i));
 
     Shader shader("vshader.vs", "fshader.fs");
-    Shader titi("voverlayshader.vs", "foverlayshader.fs");
 
     char model_buff[256] = "";
     std::map<const char*, Model*> models;
@@ -473,7 +524,6 @@ int actual_program(int argc, char** argv)
         unsigned int l_model = glGetUniformLocation(shader.program, "model");
         glUniformMatrix4fv(l_model, 1, GL_FALSE, glm::value_ptr(model));
 
-        //m->Draw(shader);
         for(std::pair<const char*, Model*> p : models)
         {
             if(p.second)

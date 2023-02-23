@@ -63,3 +63,5 @@ file(GLOB dae "models/*.dae")
 foreach(file ${dae})
     file(COPY ${file} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 endforeach()
+
+file(COPY models/textures DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
