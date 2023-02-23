@@ -13,6 +13,6 @@ for f in file:
     dae = open(os.curdir + "/models/" + f, 'w')
     for line in Lines:
        match = re.search(r'<\w+[\" "+]?\/>', line) 
-       if match not in line:
+       if match is None:
         dae.write(line)
     dae.close()
