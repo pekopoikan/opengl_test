@@ -88,16 +88,10 @@ class Shader
 
             setupShader();
         };
-        ~Shader();
     private:
         void setupContext(const char*, std::string&);
         void setupShader();
 };
-
-Shader::~Shader()
-{
-    //glDeleteProgram(program);
-}
 
 void Shader::setupContext(const char* file_name, std::string& context)
 {
@@ -143,6 +137,8 @@ void Shader::setupShader()
     glLinkProgram(program);
 }
 
+static const int MAX_BONE_INFLUENCE {4};
+
 struct Vertex
 {
     glm::vec3 Position;
@@ -155,32 +151,33 @@ struct Texture
     unsigned int id;
 };
 
+struct BoneVertexInfo
+{
+    unsigned int m_iId;
+    float m_fWeight;
+};
+
 class Mesh
 {
+    public:
+        std::map<std::string, glm::mat4x4> offsets; // bone and its offset matrix
+        std::map<std::string, std::vector<BoneVertexInfo>> BoneInfo; // name of the bone and vertices affected by the bone
     public:
         std::vector<Vertex> vertices;
         std::vector<Texture> textures;
         std::vector<unsigned int> indices;
     public:
-        Mesh()
-        {
-            fprintf(stdout, "Mesh constructor called\n");
-        };
-        ~Mesh()
-        {
-            fprintf(stdout, "Mesh descrtuctor called\n");
-        }
+        Mesh() = default;
     public:
         void Draw(Shader&);
         void setup();
+        void processBones(aiBone*);
     private:
         unsigned int VAO, VBO, EBO;
 };
 
 void Mesh::setup()
 {
-    fprintf(stdout, "vertices size %i\n", vertices.size());
-
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     glGenBuffers(1, &EBO);
@@ -219,61 +216,56 @@ void Mesh::Draw(Shader& shader)
     glActiveTexture(0);
 }
 
+static inline glm::mat4x4 aiMatrixToGLM(aiMatrix4x4& matrix)
+{
+    glm::mat4x4 glm_matrix;
+    
+    for(unsigned int m = 0; m < 4; m++) {
+        for(unsigned int n = 0; n < 4; n++) {
+            glm_matrix[m][n] = matrix[m][n];
+        }
+    }
+
+    return glm_matrix;
+}
+
+void Mesh::processBones(aiBone* bone)
+{
+    fprintf(stdout, "%sBone: %s total vertices: %i%s\n", std::string(5, '*').c_str(), bone->mName.C_Str(), bone->mNumWeights, std::string(5, '*').c_str());
+
+    std::string bone_name = bone->mName.C_Str();
+    std::vector<BoneVertexInfo> info;
+
+    for(unsigned int i = 0; i < bone->mNumWeights; i++)
+    {
+        BoneVertexInfo bvi;
+
+        bvi.m_iId = bone->mWeights[i].mVertexId;
+        bvi.m_fWeight = bone->mWeights[i].mWeight;
+
+        info.push_back(bvi);
+
+        fprintf(stdout, "[Vertex ID: %i Weight: %.2f]\n", bvi.m_iId, bvi.m_fWeight);
+    }
+
+    BoneInfo.insert(std::make_pair(bone_name, info));
+    offsets.insert(std::make_pair(bone_name, aiMatrixToGLM(bone->mOffsetMatrix)));
+}
+
 class Model
 {
     private:
         std::vector<Mesh> meshes;
     public:
-        Model()
-        {
-            setupOverlay();
-        };
-        ~Model()
-        {
-            fprintf(stdout, "Model destructor called\n");
-        }
+        Model() = default;
     public:
         void loadModel(std::string&);
+        void loadAnimation(const char* const);
         void Draw(Shader&);
     private:
         Mesh processMesh(aiMesh*, const aiScene*);
-    //
-    public:
-        void setupOverlay();
-        void DrawOverlay();
-    private:
-        unsigned int VAO, VBO, EBO;
-        const Shader* const s = new Shader("voverlayshader.vs", "foverlayshader.fs");
+        void processAnimation(aiAnimation*);
 };
-
-void Model::setupOverlay()
-{
-    fprintf(stdout, "Overlay setup");
-
-    glGenVertexArrays(1, &VAO);
-    glGenBuffers(1, &VBO);
-    glGenBuffers(1, &EBO);
-
-    glBindVertexArray(VAO);
-
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(g_v_o), g_v_o, GL_STATIC_DRAW);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(g_i_o), g_i_o, GL_STATIC_DRAW);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*) 0);
-    glBindVertexArray(0);
-}
-
-void Model::DrawOverlay()
-{
-    glUseProgram(s->program);
-    glBindVertexArray(VAO);
-    glDrawElements(GL_TRIANGLES, 1, GL_UNSIGNED_INT, 0);
-    glBindVertexArray(0);
-}
 
 void Model::loadModel(std::string& path)
 {
@@ -292,21 +284,44 @@ void Model::loadModel(std::string& path)
     fprintf(stdout, "Meshes size %i\n", meshes.size());
 }
 
+void Model::loadAnimation(const char* const path)
+{
+    Assimp::Importer importer;
+    const aiScene* scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_FlipUVs);
+
+    if(!scene) {
+        fprintf(stdout, "Couldnt import animation %s\n", path);
+    } else {
+        for(unsigned int i = 0; i < scene->mNumAnimations; i++)
+        {
+            processAnimation(scene->mAnimations[i]);
+        }
+    }
+}
+
+void Model::processAnimation(aiAnimation* animation)
+{
+    fprintf(stdout, "Processing Animation: %s, Duration: %.2f\n", animation->mName.C_Str(), animation->mDuration);
+
+    for(unsigned int i = 0; i < animation->mNumChannels; i++)
+    {
+        fprintf(stdout, "Mesh Channel: %s, Position Keys: %i, Scaling keys %i, Rotation Kyes %i\n",
+        animation->mChannels[i]->mNodeName.C_Str(), animation->mChannels[i]->mNumPositionKeys,
+        animation->mChannels[i]->mNumScalingKeys, animation->mChannels[i]->mNumRotationKeys);
+    }
+};
+
 Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 {
     Mesh m;
 
     if(mesh->HasBones())
     {
-        fprintf(stdout, ("%s has bones \n"), mesh->mName.C_Str());
-        mesh->mBones
+        for(unsigned int i = 0; i < mesh->mNumBones; i++)
+        {
+            m.processBones(*mesh->mBones);
+        }
     }
-
-    if(scene->HasAnimations())
-    {
-        fprintf(stdout, "has animations\n");
-    }
-
     // vertices
     for(unsigned int i = 0; i < mesh->mNumVertices; i++)
     {
@@ -404,8 +419,6 @@ void Model::Draw(Shader& shader)
     {
         meshes[i].Draw(shader);
     }
-
-    DrawOverlay();
 }
 
 void turn_polygon_mode(int);
@@ -426,7 +439,6 @@ int actual_program(int argc, char** argv)
 
     gladLoadGLLoader((GLADloadproc) glfwGetProcAddress);
 
-    //glEnable(GL_TEXTURE);
     glEnable(GL_DEPTH_TEST);
 
     IMGUI_CHECKVERSION();
@@ -440,9 +452,6 @@ int actual_program(int argc, char** argv)
     std::vector<float> v;
     std::vector<unsigned int> i;
     std::vector<Texture> t;
-
-    //std::copy(&g_vertices[0], &g_vertices[sizeof(g_vertices) / sizeof(g_vertices[0])], std::back_inserter(v));
-    //std::copy(&g_indices[0], &g_indices[sizeof(g_indices) / sizeof(g_indices[0])], std::back_inserter(i));
 
     Shader shader("vshader.vs", "fshader.fs");
 
@@ -469,8 +478,10 @@ int actual_program(int argc, char** argv)
             {
                 if(models.find(model_buff) == models.end()) {
                     std::string t = std::string(model_buff);
+                    std::string a = "Standing Run Left.dae";
                     Model* n = new Model();
                     n->loadModel(t);
+                    n->loadAnimation("Standing Run Left.dae");
                     models.insert(std::make_pair<const char*, Model*>(model_buff, static_cast<Model*>(n)));
                 } else {
                     models.erase(model_buff);
