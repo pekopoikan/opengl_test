@@ -367,6 +367,7 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
                 {
                     fprintf(stdout, "Vertex %i affected by Bone %s with weight %.2f\n",
                     mesh->mBones[i]->mWeights[k].mVertexId, mesh->mBones[i]->mName.C_Str(), mesh->mBones[i]->mWeights[k].mWeight);
+                    getVertexId(m.vertices, mesh->mBones[i]->mWeights[k].mVertexId, bone.id);
                 }
                 fprintf(stdout, "[Vertex info] [Weight: %.2f] [Id: %i]\n", mesh->mBones[i]->mWeights[k].mWeight, mesh->mBones[i]->mWeights[k].mVertexId);
             }
