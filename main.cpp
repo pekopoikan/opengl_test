@@ -144,6 +144,8 @@ struct Vertex
     glm::vec3 Position;
     glm::vec3 Normals;
     glm::vec2 Coordinates;
+    unsigned int bone_id;
+    float bone_weight;
 };
 
 struct Texture
@@ -151,17 +153,8 @@ struct Texture
     unsigned int id;
 };
 
-struct BoneVertexInfo
-{
-    unsigned int m_iId;
-    float m_fWeight;
-};
-
 class Mesh
 {
-    public:
-        std::map<std::string, glm::mat4x4> offsets; // bone and its offset matrix
-        std::map<std::string, std::vector<BoneVertexInfo>> BoneInfo; // name of the bone and vertices affected by the bone
     public:
         std::vector<Vertex> vertices;
         std::vector<Texture> textures;
@@ -171,7 +164,6 @@ class Mesh
     public:
         void Draw(Shader&);
         void setup();
-        void processBones(aiBone*);
     private:
         unsigned int VAO, VBO, EBO;
 };
@@ -229,42 +221,28 @@ static inline glm::mat4x4 aiMatrixToGLM(aiMatrix4x4& matrix)
     return glm_matrix;
 }
 
-void Mesh::processBones(aiBone* bone)
+unsigned int g_id {0};
+
+struct Bone
 {
-    fprintf(stdout, "%sBone: %s total vertices: %i%s\n", std::string(5, '*').c_str(), bone->mName.C_Str(), bone->mNumWeights, std::string(5, '*').c_str());
+    glm::mat4 offsetm;
+    unsigned int id;
 
-    std::string bone_name = bone->mName.C_Str();
-    std::vector<BoneVertexInfo> info;
-
-    for(unsigned int i = 0; i < bone->mNumWeights; i++)
-    {
-        BoneVertexInfo bvi;
-
-        bvi.m_iId = bone->mWeights[i].mVertexId;
-        bvi.m_fWeight = bone->mWeights[i].mWeight;
-
-        info.push_back(bvi);
-
-        fprintf(stdout, "[Vertex ID: %i Weight: %.2f]\n", bvi.m_iId, bvi.m_fWeight);
-    }
-
-    BoneInfo.insert(std::make_pair(bone_name, info));
-    offsets.insert(std::make_pair(bone_name, aiMatrixToGLM(bone->mOffsetMatrix)));
-}
+    Bone(): id(g_id++) {};
+};
 
 class Model
 {
     private:
         std::vector<Mesh> meshes;
+        std::vector<Bone> model_bones;
     public:
         Model() = default;
     public:
         void loadModel(std::string&);
-        void loadAnimation(const char* const);
         void Draw(Shader&);
     private:
         Mesh processMesh(aiMesh*, const aiScene*);
-        void processAnimation(aiAnimation*);
 };
 
 void Model::loadModel(std::string& path)
@@ -279,49 +257,14 @@ void Model::loadModel(std::string& path)
         {
             meshes.push_back(processMesh(scene->mMeshes[i], scene));
         }
-    }
-
-    fprintf(stdout, "Meshes size %i\n", meshes.size());
-}
-
-void Model::loadAnimation(const char* const path)
-{
-    Assimp::Importer importer;
-    const aiScene* scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_FlipUVs);
-
-    if(!scene) {
-        fprintf(stdout, "Couldnt import animation %s\n", path);
-    } else {
-        for(unsigned int i = 0; i < scene->mNumAnimations; i++)
-        {
-            processAnimation(scene->mAnimations[i]);
-        }
+        fprintf(stdout, "Total number of bones %i,%i\n", model_bones.size(), g_id);
     }
 }
-
-void Model::processAnimation(aiAnimation* animation)
-{
-    fprintf(stdout, "Processing Animation: %s, Duration: %.2f\n", animation->mName.C_Str(), animation->mDuration);
-
-    for(unsigned int i = 0; i < animation->mNumChannels; i++)
-    {
-        fprintf(stdout, "Mesh Channel: %s, Position Keys: %i, Scaling keys %i, Rotation Kyes %i\n",
-        animation->mChannels[i]->mNodeName.C_Str(), animation->mChannels[i]->mNumPositionKeys,
-        animation->mChannels[i]->mNumScalingKeys, animation->mChannels[i]->mNumRotationKeys);
-    }
-};
 
 Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 {
     Mesh m;
 
-    if(mesh->HasBones())
-    {
-        for(unsigned int i = 0; i < mesh->mNumBones; i++)
-        {
-            m.processBones(*mesh->mBones);
-        }
-    }
     // vertices
     for(unsigned int i = 0; i < mesh->mNumVertices; i++)
     {
@@ -410,6 +353,26 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 
     m.setup();
 
+    if(mesh->HasBones())
+    {
+        for(unsigned int i = 0; i < mesh->mNumBones; i++)
+        {
+            Bone bone;
+            bone.offsetm = aiMatrixToGLM(mesh->mBones[i]->mOffsetMatrix);
+            model_bones.push_back(bone);
+
+            for(unsigned int k = 0; k < mesh->mBones[i]->mNumWeights; k++)
+            {
+                if(mesh->mBones[i]->mWeights[k].mWeight > 0.2f)
+                {
+                    fprintf(stdout, "Vertex %i affected by Bone %s with weight %.2f\n",
+                    mesh->mBones[i]->mWeights[k].mVertexId, mesh->mBones[i]->mName.C_Str(), mesh->mBones[i]->mWeights[k].mWeight);
+                }
+                fprintf(stdout, "[Vertex info] [Weight: %.2f] [Id: %i]\n", mesh->mBones[i]->mWeights[k].mWeight, mesh->mBones[i]->mWeights[k].mVertexId);
+            }
+        }
+    }
+
     return m;
 }
 
@@ -481,7 +444,6 @@ int actual_program(int argc, char** argv)
                     std::string a = "Standing Run Left.dae";
                     Model* n = new Model();
                     n->loadModel(t);
-                    n->loadAnimation("Standing Run Left.dae");
                     models.insert(std::make_pair<const char*, Model*>(model_buff, static_cast<Model*>(n)));
                 } else {
                     models.erase(model_buff);
