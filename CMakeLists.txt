@@ -5,6 +5,7 @@ find_package(OpenGL REQUIRED)
 find_package(assimp REQUIRED)
 
 set(IMGUI_DIR ../imgui)
+set(CMAKE_CXX_STANDARD 11)
 
 set(stb stb_image.h stb_image.cpp)
 add_library(stb_lib ${stb})

@@ -153,6 +153,33 @@ struct Texture
     unsigned int id;
 };
 
+class Animation
+{
+    public:
+        Animation(const char* path): path(path) {};
+    public:
+        void loadAnimation();
+    private:
+        const char* path;
+        double animation_duration;
+};
+
+void Animation::loadAnimation()
+{
+    Assimp::Importer importer;
+    const aiScene* scene = importer.ReadFile(path, aiProcess_FlipUVs | aiProcess_Triangulate);
+
+    if(!scene) {
+        fprintf(stdout, "Couldnt import scene\n");
+    } else {
+        animation_duration = scene->mAnimations[0]->mDuration;
+        for(unsigned int i = 0; i < scene->mAnimations[0]->mNumChannels; i++)
+        {
+            fprintf(stdout, "Channel %s\n", scene->mAnimations[0]->mChannels[i]->mNodeName.C_Str());
+        }
+    }
+}
+
 class Mesh
 {
     public:
@@ -190,6 +217,12 @@ void Mesh::setup()
 
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*) offsetof(Vertex, Coordinates));
+
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 1, GL_UNSIGNED_INT, GL_FALSE, sizeof(Vertex), (void*) offsetof(Vertex, bone_id));
+
+    glEnableVertexAttribArray(4);
+    glVertexAttribPointer(4, 1, GL_UNSIGNED_INT, GL_FALSE, sizeof(Vertex), (void*) offsetof(Vertex, bone_weight));
 
     glBindVertexArray(0);
 }
@@ -234,6 +267,7 @@ struct Bone
 class Model
 {
     private:
+        std::map<const char*, unsigned int> bone_index;
         std::vector<Mesh> meshes;
         std::vector<Bone> model_bones;
     public:
@@ -241,6 +275,7 @@ class Model
     public:
         void loadModel(std::string&);
         void Draw(Shader&);
+        void getVertexId(std::vector<Vertex>&, unsigned int, float, unsigned int);
     private:
         Mesh processMesh(aiMesh*, const aiScene*);
 };
@@ -258,6 +293,15 @@ void Model::loadModel(std::string& path)
             meshes.push_back(processMesh(scene->mMeshes[i], scene));
         }
         fprintf(stdout, "Total number of bones %i,%i\n", model_bones.size(), g_id);
+    }
+}
+
+void Model::getVertexId(std::vector<Vertex>& vertices, unsigned int vId, float weight, unsigned int bId)
+{
+    if(vertices.at(vId).bone_id == -1)
+    {
+        vertices.at(vId).bone_id = bId;
+        vertices.at(vId).bone_weight = weight;
     }
 }
 
@@ -287,6 +331,8 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
         } else {
             vertex.Coordinates = glm::vec2(0.0f, 0.0f);
         }
+
+        vertex.bone_id = -1;
 
         m.vertices.push_back(vertex);
     }
@@ -363,11 +409,16 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 
             for(unsigned int k = 0; k < mesh->mBones[i]->mNumWeights; k++)
             {
+                if(bone_index.find(mesh->mBones[i]->mName.C_Str()) == bone_index.end())
+                {
+                    bone_index.insert(std::make_pair(mesh->mBones[i]->mName.C_Str(), bone.id));
+                }
+
                 if(mesh->mBones[i]->mWeights[k].mWeight > 0.2f)
                 {
                     fprintf(stdout, "Vertex %i affected by Bone %s with weight %.2f\n",
                     mesh->mBones[i]->mWeights[k].mVertexId, mesh->mBones[i]->mName.C_Str(), mesh->mBones[i]->mWeights[k].mWeight);
-                    getVertexId(m.vertices, mesh->mBones[i]->mWeights[k].mVertexId, bone.id);
+                    getVertexId(m.vertices, mesh->mBones[i]->mWeights[k].mVertexId, mesh->mBones[i]->mWeights[k].mWeight, bone.id);
                 }
                 fprintf(stdout, "[Vertex info] [Weight: %.2f] [Id: %i]\n", mesh->mBones[i]->mWeights[k].mWeight, mesh->mBones[i]->mWeights[k].mVertexId);
             }
@@ -395,6 +446,12 @@ int actual_program(int argc, char** argv)
     signal(SIGUSR1, turn_polygon_mode);
 
     glfwInit();
+    #ifdef __APPLE__
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    #endif
 
     GLFWwindow* window = glfwCreateWindow(g_window_w, g_window_h, "Window", NULL, NULL);
 
@@ -420,6 +477,7 @@ int actual_program(int argc, char** argv)
     Shader shader("vshader.vs", "fshader.fs");
 
     char model_buff[256] = "";
+    char anim_buff[256] = "";
     std::map<const char*, Model*> models;
 
     glfwSetScrollCallback(window, handle_scroll);
@@ -451,6 +509,13 @@ int actual_program(int argc, char** argv)
                 }
 
                 memset(model_buff, 0, IM_ARRAYSIZE(model_buff));
+            }
+
+            ImGui::InputText("Import Animation", anim_buff, IM_ARRAYSIZE(anim_buff));
+            if(ImGui::Button("Import"))
+            {
+                Animation anim(anim_buff);
+                anim.loadAnimation();
             }
 
             ImGui::SliderFloat("Camera Distance", &g_camera_dis, -100.0f, 100.0f, "%.3f");
