@@ -52,7 +52,7 @@ glm::vec3 g_scale(0.005f, 0.005f, 0.005f);
 
 glm::vec3 g_view(0.0f, 0.0f, -3.0f);
 
-glm::vec3 g_pos(0.0f, 0.0f, 0.0f);
+glm::vec3 g_pos(0.0f, 0.05f, 0.0f);
 
 glm::vec3 g_rot(0.0f, 0.0f, 1.0f);
 
@@ -71,6 +71,41 @@ enum PROGRAM_EXIT
     PROGRAM_EXIT_FAILED = -1,
     PROGRAM_EXIT_EXCEPTION = -2
 };
+
+static inline glm::mat4x4 aiMatrixToGLM(aiMatrix4x4& from)
+{
+    glm::mat4 to;
+
+    to[0][0] = from.a1; to[1][0] = from.a2; to[2][0] = from.a3; to[3][0] = from.a4;
+    to[0][1] = from.b1; to[1][1] = from.b2; to[2][1] = from.b3; to[3][1] = from.b4;
+    to[0][2] = from.c1; to[1][2] = from.c2; to[2][2] = from.c3; to[3][2] = from.c4;
+    to[0][3] = from.d1; to[1][3] = from.d2; to[2][3] = from.d3; to[3][3] = from.d4;
+
+    return to;    
+}
+
+static inline glm::vec3 aiVectorToGLM(aiVector3D& from)
+{
+    glm::vec3 to;
+
+    to[0] = from.x;
+    to[1] = from.y;
+    to[2] = from.z;
+
+    return to;
+}
+
+static inline glm::quat aiQuatToGLM(aiQuaternion& from)
+{
+    glm::quat to;
+
+    to.w = from.w;
+    to.x = from.x;
+    to.y = from.y;
+    to.z = from.z;
+
+    return to;
+}
 
 class Shader
 {
@@ -139,6 +174,8 @@ void Shader::setupShader()
 
 static const int MAX_BONE_INFLUENCE {4};
 
+class Model;
+
 struct Vertex
 {
     glm::vec3 Position;
@@ -153,32 +190,11 @@ struct Texture
     unsigned int id;
 };
 
-class Animation
+struct Bone
 {
-    public:
-        Animation(const char* path): path(path) {};
-    public:
-        void loadAnimation();
-    private:
-        const char* path;
-        double animation_duration;
+    glm::mat4 offsetm;
+    unsigned int id;
 };
-
-void Animation::loadAnimation()
-{
-    Assimp::Importer importer;
-    const aiScene* scene = importer.ReadFile(path, aiProcess_FlipUVs | aiProcess_Triangulate);
-
-    if(!scene) {
-        fprintf(stdout, "Couldnt import scene\n");
-    } else {
-        animation_duration = scene->mAnimations[0]->mDuration;
-        for(unsigned int i = 0; i < scene->mAnimations[0]->mNumChannels; i++)
-        {
-            fprintf(stdout, "Channel %s\n", scene->mAnimations[0]->mChannels[i]->mNodeName.C_Str());
-        }
-    }
-}
 
 class Mesh
 {
@@ -218,12 +234,6 @@ void Mesh::setup()
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*) offsetof(Vertex, Coordinates));
 
-    glEnableVertexAttribArray(3);
-    glVertexAttribPointer(3, 1, GL_UNSIGNED_INT, GL_FALSE, sizeof(Vertex), (void*) offsetof(Vertex, bone_id));
-
-    glEnableVertexAttribArray(4);
-    glVertexAttribPointer(4, 1, GL_UNSIGNED_INT, GL_FALSE, sizeof(Vertex), (void*) offsetof(Vertex, bone_weight));
-
     glBindVertexArray(0);
 }
 
@@ -241,43 +251,21 @@ void Mesh::Draw(Shader& shader)
     glActiveTexture(0);
 }
 
-static inline glm::mat4x4 aiMatrixToGLM(aiMatrix4x4& matrix)
-{
-    glm::mat4x4 glm_matrix;
-    
-    for(unsigned int m = 0; m < 4; m++) {
-        for(unsigned int n = 0; n < 4; n++) {
-            glm_matrix[m][n] = matrix[m][n];
-        }
-    }
-
-    return glm_matrix;
-}
-
-unsigned int g_id {0};
-
-struct Bone
-{
-    glm::mat4 offsetm;
-    unsigned int id;
-
-    Bone(): id(g_id++) {};
-};
-
 class Model
 {
     private:
-        std::map<const char*, unsigned int> bone_index;
+        unsigned int bone_counter {0};
+    public:
         std::vector<Mesh> meshes;
-        std::vector<Bone> model_bones;
+        std::map<const char*, Bone> bone_info;
     public:
         Model() = default;
     public:
         void loadModel(std::string&);
         void Draw(Shader&);
-        void getVertexId(std::vector<Vertex>&, unsigned int, float, unsigned int);
     private:
         Mesh processMesh(aiMesh*, const aiScene*);
+        void processBone(aiMesh*, Mesh&);
 };
 
 void Model::loadModel(std::string& path)
@@ -292,16 +280,36 @@ void Model::loadModel(std::string& path)
         {
             meshes.push_back(processMesh(scene->mMeshes[i], scene));
         }
-        fprintf(stdout, "Total number of bones %i,%i\n", model_bones.size(), g_id);
     }
 }
 
-void Model::getVertexId(std::vector<Vertex>& vertices, unsigned int vId, float weight, unsigned int bId)
+void Model::processBone(aiMesh* mesh, Mesh& m)
 {
-    if(vertices.at(vId).bone_id == -1)
+    if(mesh->HasBones())
     {
-        vertices.at(vId).bone_id = bId;
-        vertices.at(vId).bone_weight = weight;
+        for(unsigned int i = 0; i < mesh->mNumBones; i++)
+        {
+            if(bone_info.find(mesh->mBones[i]->mName.C_Str()) == bone_info.end())
+            {
+                Bone bone;
+                bone.id = bone_counter;
+                bone.offsetm = aiMatrixToGLM(mesh->mBones[i]->mOffsetMatrix);
+
+                bone_info.insert(std::make_pair(mesh->mBones[i]->mName.C_Str(), bone));
+            }
+
+            for(unsigned int k = 0; k < mesh->mBones[i]->mNumWeights; k++)
+            {
+                unsigned int index = mesh->mBones[i]->mWeights[k].mVertexId;
+                if(m.vertices[index].bone_id == -1)
+                {
+                    m.vertices[index].bone_id = bone_counter;
+                    m.vertices[index].bone_weight = mesh->mBones[i]->mWeights[k].mWeight;
+                }
+            }
+
+            bone_counter++;
+        }
     }
 }
 
@@ -336,6 +344,8 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 
         m.vertices.push_back(vertex);
     }
+
+    processBone(mesh, m);
 
     //loading textures
     aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
@@ -399,32 +409,6 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 
     m.setup();
 
-    if(mesh->HasBones())
-    {
-        for(unsigned int i = 0; i < mesh->mNumBones; i++)
-        {
-            Bone bone;
-            bone.offsetm = aiMatrixToGLM(mesh->mBones[i]->mOffsetMatrix);
-            model_bones.push_back(bone);
-
-            for(unsigned int k = 0; k < mesh->mBones[i]->mNumWeights; k++)
-            {
-                if(bone_index.find(mesh->mBones[i]->mName.C_Str()) == bone_index.end())
-                {
-                    bone_index.insert(std::make_pair(mesh->mBones[i]->mName.C_Str(), bone.id));
-                }
-
-                if(mesh->mBones[i]->mWeights[k].mWeight > 0.2f)
-                {
-                    fprintf(stdout, "Vertex %i affected by Bone %s with weight %.2f\n",
-                    mesh->mBones[i]->mWeights[k].mVertexId, mesh->mBones[i]->mName.C_Str(), mesh->mBones[i]->mWeights[k].mWeight);
-                    getVertexId(m.vertices, mesh->mBones[i]->mWeights[k].mVertexId, mesh->mBones[i]->mWeights[k].mWeight, bone.id);
-                }
-                fprintf(stdout, "[Vertex info] [Weight: %.2f] [Id: %i]\n", mesh->mBones[i]->mWeights[k].mWeight, mesh->mBones[i]->mWeights[k].mVertexId);
-            }
-        }
-    }
-
     return m;
 }
 
@@ -477,7 +461,7 @@ int actual_program(int argc, char** argv)
     Shader shader("vshader.vs", "fshader.fs");
 
     char model_buff[256] = "";
-    char anim_buff[256] = "";
+
     std::map<const char*, Model*> models;
 
     glfwSetScrollCallback(window, handle_scroll);
@@ -509,13 +493,6 @@ int actual_program(int argc, char** argv)
                 }
 
                 memset(model_buff, 0, IM_ARRAYSIZE(model_buff));
-            }
-
-            ImGui::InputText("Import Animation", anim_buff, IM_ARRAYSIZE(anim_buff));
-            if(ImGui::Button("Import"))
-            {
-                Animation anim(anim_buff);
-                anim.loadAnimation();
             }
 
             ImGui::SliderFloat("Camera Distance", &g_camera_dis, -100.0f, 100.0f, "%.3f");

@@ -14,8 +14,6 @@ uniform mat4 model;
 
 uniform mat4 transformation;
 
-uniform mat4 bones[100];
-
 void main()
 {
     gl_Position = projection * view * model * transformation * vec4(aPos, 1.0);
