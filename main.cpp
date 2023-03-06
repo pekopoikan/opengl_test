@@ -52,7 +52,7 @@ glm::vec3 g_scale(0.005f, 0.005f, 0.005f);
 
 glm::vec3 g_view(0.0f, 0.0f, -3.0f);
 
-glm::vec3 g_pos(0.0f, 0.05f, 0.0f);
+glm::vec3 g_pos(0.0f, -0.5f, 0.0f);
 
 glm::vec3 g_rot(0.0f, 0.0f, 1.0f);
 
@@ -199,8 +199,7 @@ struct Bone
 class Animation
 {
     private:
-        std::map<const char*, glm::mat4> parent;
-        std::map<const char*, const char*> hir;
+        std::map<std::string, glm::vec3> rot;
     public:
         Animation(std::string);
 };
@@ -212,25 +211,9 @@ Animation::Animation(std::string path)
     const aiScene* scene = importer.ReadFile(path, aiProcess_FlipUVs | aiProcess_Triangulate);
 
     if (!scene) {
-        fprintf(stderr, "Couldnt import animation");
+        fprintf(stderr, "Couldnt import animation\n");
     } else {
-        for(unsigned int i = 0; i < scene->mRootNode->mNumChildren; i++)
-        {
-            const char* child_name = scene->mRootNode->mChildren[i]->mName.C_Str();
-            const char* parent_name = scene->mRootNode->mChildren[i]->mParent->mName.C_Str();
-
-            if(parent.find(parent_name) == parent.end())
-            {
-                parent.insert(std::make_pair(
-                    parent_name,
-                    aiMatrixToGLM(scene->mRootNode->mChildren[i]->mParent->mTransformation)));
-            }
-
-            if(hir.find(child_name) == hir.end())
-            {
-                hir.insert(std::make_pair(child_name, parent_name));
-            }
-        }
+        fprintf(stderr, "Coudl import animation\n");
     }
 }
 
@@ -314,9 +297,12 @@ void Model::loadModel(std::string& path)
     if(!scene) {
         fprintf(stdout, "Couldnt import model file\n%s\n", importer.GetErrorString());
     } else {
-        for(unsigned i = 0; i < scene->mNumMeshes; i++)
+        for(unsigned int i = 0; i < scene->mNumMeshes; i++)
         {
             meshes.push_back(processMesh(scene->mMeshes[i], scene));
+        }
+        for(unsigned int i = 0; i < scene->mRootNode->mNumChildren; i++)
+        {
         }
     }
 }
@@ -539,6 +525,22 @@ int actual_program(int argc, char** argv)
             ImGui::SliderFloat("Rotation angle", &g_z_rot, -100.0f, 100.0f);
             ImGui::SliderFloat3("Rotation", glm::value_ptr(g_rot), 0.0f, 1.0f);
             ImGui::Button("Save Changes");
+            ImGui::End();
+        }
+
+        {
+            ImGui::Begin("Model Bone Structure");
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.f, 1.f));
+            if(ImGui::TreeNodeEx("test", ImGuiTreeNodeFlags_FramePadding)) {
+                if(ImGui::TreeNodeEx("another test", ImGuiTreeNodeFlags_FramePadding))
+                {
+                    ImGui::Text("test");
+                    ImGui::TreePop();
+                }
+                ImGui::Text("test");
+                ImGui::TreePop();
+            };
+            ImGui::PopStyleVar();
             ImGui::End();
         }
 
