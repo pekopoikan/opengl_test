@@ -196,6 +196,44 @@ struct Bone
     unsigned int id;
 };
 
+class Animation
+{
+    private:
+        std::map<const char*, glm::mat4> parent;
+        std::map<const char*, const char*> hir;
+    public:
+        Animation(std::string);
+};
+
+Animation::Animation(std::string path)
+{
+    Assimp::Importer importer;
+
+    const aiScene* scene = importer.ReadFile(path, aiProcess_FlipUVs | aiProcess_Triangulate);
+
+    if (!scene) {
+        fprintf(stderr, "Couldnt import animation");
+    } else {
+        for(unsigned int i = 0; i < scene->mRootNode->mNumChildren; i++)
+        {
+            const char* child_name = scene->mRootNode->mChildren[i]->mName.C_Str();
+            const char* parent_name = scene->mRootNode->mChildren[i]->mParent->mName.C_Str();
+
+            if(parent.find(parent_name) == parent.end())
+            {
+                parent.insert(std::make_pair(
+                    parent_name,
+                    aiMatrixToGLM(scene->mRootNode->mChildren[i]->mParent->mTransformation)));
+            }
+
+            if(hir.find(child_name) == hir.end())
+            {
+                hir.insert(std::make_pair(child_name, parent_name));
+            }
+        }
+    }
+}
+
 class Mesh
 {
     public:
@@ -257,7 +295,7 @@ class Model
         unsigned int bone_counter {0};
     public:
         std::vector<Mesh> meshes;
-        std::map<const char*, Bone> bone_info;
+        std::map<std::string, Bone> bone_info;
     public:
         Model() = default;
     public:
@@ -289,17 +327,23 @@ void Model::processBone(aiMesh* mesh, Mesh& m)
     {
         for(unsigned int i = 0; i < mesh->mNumBones; i++)
         {
-            if(bone_info.find(mesh->mBones[i]->mName.C_Str()) == bone_info.end())
+            const char* bone_name = mesh->mBones[i]->mName.C_Str();
+            std::string test(mesh->mBones[i]->mName.data);
+
+            if(bone_info.find(bone_name) == bone_info.end())
             {
                 Bone bone;
                 bone.id = bone_counter;
                 bone.offsetm = aiMatrixToGLM(mesh->mBones[i]->mOffsetMatrix);
 
-                bone_info.insert(std::make_pair(mesh->mBones[i]->mName.C_Str(), bone));
+                bone_info.insert(std::make_pair(test, bone));
+
+                bone_counter++;
             }
 
             for(unsigned int k = 0; k < mesh->mBones[i]->mNumWeights; k++)
             {
+                // index with respect to mesh vertex
                 unsigned int index = mesh->mBones[i]->mWeights[k].mVertexId;
                 if(m.vertices[index].bone_id == -1)
                 {
@@ -307,8 +351,6 @@ void Model::processBone(aiMesh* mesh, Mesh& m)
                     m.vertices[index].bone_weight = mesh->mBones[i]->mWeights[k].mWeight;
                 }
             }
-
-            bone_counter++;
         }
     }
 }
@@ -466,6 +508,15 @@ int actual_program(int argc, char** argv)
 
     glfwSetScrollCallback(window, handle_scroll);
 
+
+    std::string model_name = std::string("The Boss.dae");
+    std::string animation_name = std::string("Standing Run Left.dae");
+
+    Model* n = new Model();
+    n->loadModel(model_name);
+
+    Animation* anim = new Animation(animation_name);
+
     while(!glfwWindowShouldClose(window))
     {
         ImGui_ImplOpenGL3_NewFrame();
@@ -477,22 +528,6 @@ int actual_program(int argc, char** argv)
             if(ImGui::Button("Polygon Mode"))
             {
                 turn_polygon_mode(0);
-            }
-
-            ImGui::InputText("Model name", model_buff, IM_ARRAYSIZE(model_buff));
-            if(ImGui::Button("Import Model"))
-            {
-                if(models.find(model_buff) == models.end()) {
-                    std::string t = std::string(model_buff);
-                    std::string a = "Standing Run Left.dae";
-                    Model* n = new Model();
-                    n->loadModel(t);
-                    models.insert(std::make_pair<const char*, Model*>(model_buff, static_cast<Model*>(n)));
-                } else {
-                    models.erase(model_buff);
-                }
-
-                memset(model_buff, 0, IM_ARRAYSIZE(model_buff));
             }
 
             ImGui::SliderFloat("Camera Distance", &g_camera_dis, -100.0f, 100.0f, "%.3f");
@@ -540,13 +575,7 @@ int actual_program(int argc, char** argv)
         unsigned int l_model = glGetUniformLocation(shader.program, "model");
         glUniformMatrix4fv(l_model, 1, GL_FALSE, glm::value_ptr(model));
 
-        for(std::pair<const char*, Model*> p : models)
-        {
-            if(p.second)
-            {
-                p.second->Draw(shader);
-            }
-        }
+        n->Draw(shader); 
 
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
