@@ -220,6 +220,8 @@ Animation::Animation(std::string path)
 class Mesh
 {
     public:
+        bool heatmap { false };
+    public:
         std::vector<Vertex> vertices;
         std::vector<Texture> textures;
         std::vector<unsigned int> indices;
@@ -255,6 +257,12 @@ void Mesh::setup()
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*) offsetof(Vertex, Coordinates));
 
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*) offsetof(Vertex, bone_id));
+
+    glEnableVertexAttribArray(4);
+    glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*) offsetof(Vertex, bone_weight));
+
     glBindVertexArray(0);
 }
 
@@ -265,6 +273,19 @@ void Mesh::Draw(Shader& shader)
         glActiveTexture(GL_TEXTURE0 + i);
         glBindTexture(GL_TEXTURE_2D, textures[i].id);
     }
+
+    for(unsigned int i = 0; i < 70; i++)
+    {
+        std::string t = "color[" + std::to_string(i) + "]";
+        unsigned int k = glGetUniformLocation(shader.program, t.c_str());
+        glUniform3fv(k, 1, glm::value_ptr(glm::vec3(0.0f, i, 0.0f)));
+    }
+
+    /*if(heatmap) {
+        glUniform3fv(k, 1, glm::value_ptr(glm::vec3(0.0f, 1.0f, 0.0f)));
+    } else {
+        glUniform3fv(k, 1, glm::value_ptr(glm::vec3(1.0f)));
+    }*/
 
     glBindVertexArray(VAO);
     glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
@@ -284,6 +305,11 @@ class Model
     public:
         void loadModel(std::string&);
         void Draw(Shader&);
+    public:
+        void heatit(unsigned int index)
+        {
+            meshes[index].heatmap = !meshes[index].heatmap;
+        }
     private:
         Mesh processMesh(aiMesh*, const aiScene*);
         void processBone(aiMesh*, Mesh&);
@@ -313,8 +339,7 @@ void Model::processBone(aiMesh* mesh, Mesh& m)
     {
         for(unsigned int i = 0; i < mesh->mNumBones; i++)
         {
-            const char* bone_name = mesh->mBones[i]->mName.C_Str();
-            std::string test(mesh->mBones[i]->mName.data);
+            std::string bone_name(mesh->mBones[i]->mName.data);
 
             if(bone_info.find(bone_name) == bone_info.end())
             {
@@ -322,7 +347,7 @@ void Model::processBone(aiMesh* mesh, Mesh& m)
                 bone.id = bone_counter;
                 bone.offsetm = aiMatrixToGLM(mesh->mBones[i]->mOffsetMatrix);
 
-                bone_info.insert(std::make_pair(test, bone));
+                bone_info.insert(std::make_pair(bone_name, bone));
 
                 bone_counter++;
             }
@@ -453,6 +478,8 @@ void processInput(GLFWwindow*);
 void handle_scroll(GLFWwindow*, double, double);
 void frame(GLFWwindow*, int, int);
 
+static int colorindex { 0 };
+
 int actual_program(int argc, char** argv)
 {
     signal(SIGUSR1, turn_polygon_mode);
@@ -530,17 +557,30 @@ int actual_program(int argc, char** argv)
 
         {
             ImGui::Begin("Model Bone Structure");
+
+            std::string g = "Display" + std::to_string(colorindex);
+
+            if(ImGui::Button(g.c_str()))
+            {
+                extern int colorindex;
+
+                if(colorindex == 12) colorindex = 0;
+                if(colorindex > 0) n->heatit(colorindex - 1);
+
+                n->heatit(colorindex);
+                colorindex += 1;
+            }
+
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.f, 1.f));
-            if(ImGui::TreeNodeEx("test", ImGuiTreeNodeFlags_FramePadding)) {
-                if(ImGui::TreeNodeEx("another test", ImGuiTreeNodeFlags_FramePadding))
+            if(ImGui::TreeNodeEx("Show Bones", ImGuiTreeNodeFlags_FramePadding)) {
+                for(auto&m : n->bone_info)
                 {
-                    ImGui::Text("test");
-                    ImGui::TreePop();
+                    ImGui::SmallButton(m.first.c_str());
                 }
-                ImGui::Text("test");
                 ImGui::TreePop();
             };
             ImGui::PopStyleVar();
+
             ImGui::End();
         }
 
