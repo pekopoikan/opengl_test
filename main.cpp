@@ -176,6 +176,9 @@ static const int MAX_BONE_INFLUENCE {4};
 
 class Model;
 
+
+//Create a array of colors and assign the index of the array to each vertex
+
 struct Vertex
 {
     glm::vec3 Position;
@@ -219,6 +222,7 @@ Animation::Animation(std::string path)
 
 class Mesh
 {
+    bool heatmap{true};
     public:
         std::vector<Vertex> vertices;
         std::vector<Texture> textures;
@@ -226,7 +230,7 @@ class Mesh
     public:
         Mesh() = default;
     public:
-        void Draw(Shader&);
+        void Draw(Shader&, std::map<unsigned int, glm::vec3>&);
         void setup();
     private:
         unsigned int VAO, VBO, EBO;
@@ -241,7 +245,7 @@ void Mesh::setup()
     glBindVertexArray(VAO);
 
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), &vertices[0], GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), &vertices[0], GL_DYNAMIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), &indices[0], GL_STATIC_DRAW);
@@ -255,11 +259,20 @@ void Mesh::setup()
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*) offsetof(Vertex, Coordinates));
 
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 1, GL_UNSIGNED_INT, GL_FALSE, sizeof(Vertex), (void*) offsetof(Vertex, bone_id));
+
     glBindVertexArray(0);
 }
 
-void Mesh::Draw(Shader& shader)
+void Mesh::Draw(Shader& shader, std::map<unsigned int, glm::vec3>& m)
 {
+    if(heatmap)
+    {
+        static int loc = glGetUniformLocation(shader.program, "color[4]");
+        glUniform3fv(loc, 1, glm::value_ptr(m.find(vertices[0].bone_id)->second));
+    }
+
     for(unsigned int i = 0; i < textures.size(); i++)
     {
         glActiveTexture(GL_TEXTURE0 + i);
@@ -274,11 +287,15 @@ void Mesh::Draw(Shader& shader)
 
 class Model
 {
+    //typedef std::map<std::string, std::vector<std::string>> bstr;
     private:
         unsigned int bone_counter {0};
     public:
+        //std::map<std::string, std::vector*> bone_struct;
+        //std::vector<std::vector<std::string>> bs;
         std::vector<Mesh> meshes;
         std::map<std::string, Bone> bone_info;
+        std::map<unsigned int, glm::vec3> color_info;
     public:
         Model() = default;
     public:
@@ -287,6 +304,7 @@ class Model
     private:
         Mesh processMesh(aiMesh*, const aiScene*);
         void processBone(aiMesh*, Mesh&);
+        void buildStruct(aiNode*);
 };
 
 void Model::loadModel(std::string& path)
@@ -301,9 +319,10 @@ void Model::loadModel(std::string& path)
         {
             meshes.push_back(processMesh(scene->mMeshes[i], scene));
         }
-        for(unsigned int i = 0; i < scene->mRootNode->mNumChildren; i++)
+        /*for(unsigned int i = 0; i < scene->mRootNode->mNumChildren; i++)
         {
-        }
+            buildStruct(scene->mRootNode);
+        }*/
     }
 }
 
@@ -323,8 +342,7 @@ void Model::processBone(aiMesh* mesh, Mesh& m)
                 bone.offsetm = aiMatrixToGLM(mesh->mBones[i]->mOffsetMatrix);
 
                 bone_info.insert(std::make_pair(test, bone));
-
-                bone_counter++;
+                color_info.insert(std::make_pair(bone_counter, glm::vec3(i, 0.0f, 0.0f)));
             }
 
             for(unsigned int k = 0; k < mesh->mBones[i]->mNumWeights; k++)
@@ -335,8 +353,15 @@ void Model::processBone(aiMesh* mesh, Mesh& m)
                 {
                     m.vertices[index].bone_id = bone_counter;
                     m.vertices[index].bone_weight = mesh->mBones[i]->mWeights[k].mWeight;
+                    /*if(i == 4) {
+                        m.vertices[index].bone_color = glm::vec3(0.0f, 1.0f, 0.0f) * mesh->mBones[i]->mWeights[k].mWeight;
+                    } else {
+                        m.vertices[index].bone_color = glm::vec3(1.0f);
+                    }*/
                 }
             }
+
+            bone_counter++;
         }
     }
 }
@@ -444,7 +469,7 @@ void Model::Draw(Shader& shader)
 {
     for(unsigned int i = 0; i < meshes.size(); i++)
     {
-        meshes[i].Draw(shader);
+        meshes[i].Draw(shader, color_info);
     }
 }
 
@@ -515,6 +540,8 @@ int actual_program(int argc, char** argv)
             {
                 turn_polygon_mode(0);
             }
+
+            if(ImGui::Button("Show Color")) {}
 
             ImGui::SliderFloat("Camera Distance", &g_camera_dis, -100.0f, 100.0f, "%.3f");
             ImGui::SliderFloat3("View", glm::value_ptr(g_view), -100.0f, 100.0f);
