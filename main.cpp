@@ -222,7 +222,8 @@ Animation::Animation(std::string path)
 
 class Mesh
 {
-    bool heatmap{true};
+    public:
+        bool heatmap { false };
     public:
         std::vector<Vertex> vertices;
         std::vector<Texture> textures;
@@ -262,6 +263,9 @@ void Mesh::setup()
     glEnableVertexAttribArray(3);
     glVertexAttribPointer(3, 1, GL_UNSIGNED_INT, GL_FALSE, sizeof(Vertex), (void*) offsetof(Vertex, bone_id));
 
+    glEnableVertexAttribArray(4);
+    glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*) offsetof(Vertex, bone_weight));
+
     glBindVertexArray(0);
 }
 
@@ -278,6 +282,19 @@ void Mesh::Draw(Shader& shader, std::map<unsigned int, glm::vec3>& m)
         glActiveTexture(GL_TEXTURE0 + i);
         glBindTexture(GL_TEXTURE_2D, textures[i].id);
     }
+
+    for(unsigned int i = 0; i < 70; i++)
+    {
+        std::string t = "color[" + std::to_string(i) + "]";
+        unsigned int k = glGetUniformLocation(shader.program, t.c_str());
+        glUniform3fv(k, 1, glm::value_ptr(glm::vec3(0.0f, i, 0.0f)));
+    }
+
+    /*if(heatmap) {
+        glUniform3fv(k, 1, glm::value_ptr(glm::vec3(0.0f, 1.0f, 0.0f)));
+    } else {
+        glUniform3fv(k, 1, glm::value_ptr(glm::vec3(1.0f)));
+    }*/
 
     glBindVertexArray(VAO);
     glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
@@ -301,6 +318,11 @@ class Model
     public:
         void loadModel(std::string&);
         void Draw(Shader&);
+    public:
+        void heatit(unsigned int index)
+        {
+            meshes[index].heatmap = !meshes[index].heatmap;
+        }
     private:
         Mesh processMesh(aiMesh*, const aiScene*);
         void processBone(aiMesh*, Mesh&);
@@ -315,6 +337,7 @@ void Model::loadModel(std::string& path)
     if(!scene) {
         fprintf(stdout, "Couldnt import model file\n%s\n", importer.GetErrorString());
     } else {
+        fprintf(stdout, "mesh size %u\n", scene->mNumMeshes);
         for(unsigned int i = 0; i < scene->mNumMeshes; i++)
         {
             meshes.push_back(processMesh(scene->mMeshes[i], scene));
@@ -332,17 +355,15 @@ void Model::processBone(aiMesh* mesh, Mesh& m)
     {
         for(unsigned int i = 0; i < mesh->mNumBones; i++)
         {
-            const char* bone_name = mesh->mBones[i]->mName.C_Str();
-            std::string test(mesh->mBones[i]->mName.data);
+            std::string bone_name(mesh->mBones[i]->mName.data);
 
             if(bone_info.find(bone_name) == bone_info.end())
             {
                 Bone bone;
                 bone.id = bone_counter;
                 bone.offsetm = aiMatrixToGLM(mesh->mBones[i]->mOffsetMatrix);
-
-                bone_info.insert(std::make_pair(test, bone));
-                color_info.insert(std::make_pair(bone_counter, glm::vec3(i, 0.0f, 0.0f)));
+                bone_info.insert(std::make_pair(bone_name, bone));
+                bone_counter++;
             }
 
             for(unsigned int k = 0; k < mesh->mBones[i]->mNumWeights; k++)
@@ -369,6 +390,7 @@ void Model::processBone(aiMesh* mesh, Mesh& m)
 Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 {
     Mesh m;
+    fprintf(stdout, "%u, %u\n", mesh->mNumVertices, mesh->mNumFaces);
 
     // vertices
     for(unsigned int i = 0; i < mesh->mNumVertices; i++)
@@ -478,6 +500,8 @@ void processInput(GLFWwindow*);
 void handle_scroll(GLFWwindow*, double, double);
 void frame(GLFWwindow*, int, int);
 
+static int colorindex { 0 };
+
 int actual_program(int argc, char** argv)
 {
     signal(SIGUSR1, turn_polygon_mode);
@@ -520,7 +544,7 @@ int actual_program(int argc, char** argv)
     glfwSetScrollCallback(window, handle_scroll);
 
 
-    std::string model_name = std::string("The Boss.dae");
+    std::string model_name = std::string("Darunia.obj");
     std::string animation_name = std::string("Standing Run Left.dae");
 
     Model* n = new Model();
@@ -557,17 +581,30 @@ int actual_program(int argc, char** argv)
 
         {
             ImGui::Begin("Model Bone Structure");
+
+            std::string g = "Display" + std::to_string(colorindex);
+
+            if(ImGui::Button(g.c_str()))
+            {
+                extern int colorindex;
+
+                if(colorindex == 12) colorindex = 0;
+                if(colorindex > 0) n->heatit(colorindex - 1);
+
+                n->heatit(colorindex);
+                colorindex += 1;
+            }
+
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.f, 1.f));
-            if(ImGui::TreeNodeEx("test", ImGuiTreeNodeFlags_FramePadding)) {
-                if(ImGui::TreeNodeEx("another test", ImGuiTreeNodeFlags_FramePadding))
+            if(ImGui::TreeNodeEx("Show Bones", ImGuiTreeNodeFlags_FramePadding)) {
+                for(auto&m : n->bone_info)
                 {
-                    ImGui::Text("test");
-                    ImGui::TreePop();
+                    ImGui::SmallButton(m.first.c_str());
                 }
-                ImGui::Text("test");
                 ImGui::TreePop();
             };
             ImGui::PopStyleVar();
+
             ImGui::End();
         }
 
